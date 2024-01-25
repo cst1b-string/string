@@ -1,0 +1,20 @@
+{
+	"recommendations": [
+		"esbenp.prettier-vscode",
+		"dbaeumer.vscode-eslint",
+		"redhat.vscode-yaml",
+		"streetsidesoftware.code-spell-checker",
+		"naumovs.color-highlight",
+		"davidanson.vscode-markdownlint",
+		"mikestead.dotenv",
+		"bradlc.vscode-tailwindcss",
+		"firefox-devtools.vscode-firefox-debug",
+		"rangav.vscode-thunder-client",
+		"rust-lang.rust-analyzer",
+		"zxh404.vscode-proto3",
+		"foxundermoon.shell-format",
+		"github.vscode-github-actions",
+		"tamasfe.even-better-toml",
+		"serayuzgur.crates"
+	]
+}
