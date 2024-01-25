@@ -3,17 +3,21 @@
 	"scripts": {
 		"prepare": "husky install"
 	},
+	"workspaces": [
+		"apps/*",
+		"packages/*",
+		"tools/*",
+		"services/*"
+	],
 	"devDependencies": {
 		"@commitlint/cli": "^18.4.4",
 		"@commitlint/config-conventional": "^18.4.4",
-		"@typescript-eslint/eslint-plugin": "^5.0.0",
-		"@typescript-eslint/parser": "^5.0.0",
+		"@typescript-eslint/eslint-plugin": "^6.0.0",
+		"@typescript-eslint/parser": "^6.0.0",
 		"eslint": "^8.56.0",
-		"eslint-config-infernal": "workspace:^",
 		"husky": "^8.0.3",
 		"lint-staged": "^15.2.0",
 		"prettier": "^3.2.1",
-		"prettier-config-infernal": "workspace:^",
 		"turbo": "^1.11.3",
 		"typescript": "^5.3.3"
 	}
