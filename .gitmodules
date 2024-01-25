@@ -1,0 +1,6 @@
+[submodule "packages/eslint-config-infernal"]
+path = packages/eslint-config-infernal
+url = https://github.com/kaylendog/eslint-config-infernal.git
+[submodule "packages/prettier-config-infernal"]
+path = packages/prettier-config-infernal
+url = https://github.com/kaylendog/prettier-config-infernal.git
