@@ -3,6 +3,9 @@ name = "prisma"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+serde = { workspace = true }
+
 [dependencies.prisma-client-rust]
 git = "https://github.com/Brendonovich/prisma-client-rust"
 tag = "0.6.11"

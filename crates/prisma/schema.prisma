@@ -8,6 +8,15 @@ generator client {
     output   = "./src/prisma.rs"
 }
 
-model User {
-    id String @id
+model Channel {
+    key       Bytes             @id
+    endpoints ChannelEndpoint[]
+}
+
+model ChannelEndpoint {
+    id         String   @id @default(uuid()) @db.Uuid
+    channel    Channel  @relation(fields: [channelKey], references: [key])
+    channelKey Bytes
+    endpoint   String   @db.Inet
+    lastUpdate DateTime
 }
