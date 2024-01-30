@@ -14,7 +14,10 @@ This project requires the following OS dependencies:
 - NPM v8
 - Rust v1.75
 
-Please ensure that these are installed before continuing.
+For the backend, `protoc` is required, which can be installed by following
+[these instructions](https://grpc.io/docs/protoc-installation/).
+
+> Please ensure that these are installed before continuing, otherwise things will break!
 
 ## Installing Dependencies
 
