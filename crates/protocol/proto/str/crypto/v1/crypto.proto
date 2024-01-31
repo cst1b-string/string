@@ -1,0 +1,25 @@
+// 3DH as described in Modular Security Proofs for Key Agreement Protocols (2005)
+// Advances in Cryptology - ASIACRYPT 2005. Lecture Notes in Computer Science. Vol. 3788. 
+// Berlin, Heidelberg: Springer. pp. 549–565
+
+syntax = "proto3";
+
+package str.crypto.v1;
+
+message Setup3DHMessage {
+	bytes p = 1;
+	bytes q = 2;
+}
+
+message Initiate3DHMessage {
+	bytes t_a = 1;
+	bytes x_a = 2;
+	bytes x_b = 3;
+}
+
+message Respond3DHMessage {
+	bytes t_b = 1;
+	bytes t_a = 2;
+    bytes x_b = 3;
+    bytes x_a = 4;
+}

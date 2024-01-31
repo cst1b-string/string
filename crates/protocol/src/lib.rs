@@ -9,7 +9,7 @@ macro_rules! include_protocol {
         pub mod $version {
             include!(concat!(
                 env!("OUT_DIR"),
-                "/string.",
+                "/str.",
                 $name,
                 ".",
                 stringify!($version),
@@ -27,4 +27,12 @@ pub mod users {
 /// Defines the messages buffer types and data.
 pub mod messages {
     include_protocol!("messages", v1);
+}
+
+pub mod crypto {
+    include_protocol!("crypto", v1);
+}
+
+pub mod channels {
+    include_protocol!("channels", v1);
 }

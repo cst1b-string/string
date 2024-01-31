@@ -1,5 +1,0 @@
-syntax = "proto3";
-
-package string.messages.v1;
-
-message Message {}
