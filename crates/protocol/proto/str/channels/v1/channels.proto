@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package str.channels.v1;
+
+message Channel {
+	string id = 1;
+	string name = 2;
+	string network_id = 3;
+}

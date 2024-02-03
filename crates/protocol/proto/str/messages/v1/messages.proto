@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package str.messages.v1;
+
+message Message {
+	string id = 1;
+	string channel_id = 2;
+	string username = 3;
+	string content = 4;
+	repeated MessageAttachment attachments = 5;
+}
+
+message MessageAttachment {
+	oneof attachment {
+		ImageAttachment image = 2;
+		AudioAttachment audio = 3;
+		VideoAttachment video = 4;
+	}
+}
+
+enum AttachmentType {
+	// we need an unspecified type since protobuf encourages backwards compatibility
+	// it's a bit dumb since this is v1, but it's good practice.
+	ATTACHMENT_TYPE_UNSPECIFIED = 0;
+	ATTACHMENT_TYPE_IMAGE = 1;
+    ATTACHMENT_TYPE_AUDIO = 2;
+    ATTACHMENT_TYPE_VIDEO = 3;
+}
+
+message ImageAttachment {
+	ImageFormat format = 1;
+    bytes data = 2;
+}
+
+enum ImageFormat {
+	IMAGE_FORMAT_UNSPECIFIED = 0;
+    IMAGE_FORMAT_PNG = 1;
+    IMAGE_FORMAT_JPEG = 2;
+    IMAGE_FORMAT_WEBP = 3;
+    IMAGE_FORMAT_GIF = 4;
+}
+
+message AudioAttachment {
+    AudioFormat format = 1;
+	bytes data = 2;
+}
+
+enum AudioFormat {
+	AUDIO_FORMAT_UNSPECIFIED = 0;
+    AUDIO_FORMAT_MP3 = 1;
+    AUDIO_FORMAT_OGG = 2;
+    AUDIO_FORMAT_WAV = 3;
+}
+
+enum VideoFormat {
+	VIDEO_FORMAT_UNSPECIFIED = 0;
+    VIDEO_FORMAT_MP4 = 1;
+    VIDEO_FORMAT_WEBM = 2;
+}
+
+message VideoAttachment {
+	VideoFormat format = 1;
+	bytes data = 2;
+}

@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package str.network.v1;
+
+message NetworkJoinRequest {
+	string user = 1;
+}
+
+message NetworkJoinResponse {
+	bool success = 1;
+}
