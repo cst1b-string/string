@@ -75,15 +75,15 @@ const MAGIC: u32 = 0x01020304;
 impl Packet {
     pub fn new(pkttype: PacketType, seqno: u64, data: Option<Vec<u8>>) -> Self {
         Self {
-            pkttype: pkttype,
-            seqno: seqno,
-            data: data,
+            pkttype,
+            seqno,
+            data,
             bytes_: Vec::new()
         }
     }
 
     pub fn bytes(&mut self) -> &[u8] {
-        if self.bytes_.len() == 0 {
+        if self.bytes_.is_empty() {
             self.bytes_.extend_from_slice(&MAGIC.to_be_bytes());
             let pkttype: u8 = self.pkttype as u8;
             self.bytes_.push(pkttype);
@@ -122,7 +122,7 @@ impl Packet {
             }
             return Ok(Packet::new(pkttype, seqno, data));
         }
-        return Err(PacketError::BadMagic);
+        Err(PacketError::BadMagic)
     }
 }
 
@@ -132,9 +132,9 @@ impl Connection {
             state: ConnState::DISCON,
             socket: None,
             dst_ip: ip.to_owned(),
-            dst_port: dst_port,
-            src_port: src_port,
-            initiate: initiate
+            dst_port,
+            src_port,
+            initiate
         }
     }
 
@@ -215,11 +215,11 @@ impl Connection {
                     payload = Packet::new(PacketType::SYN, seqno, None);
                     thread::sleep(Duration::from_millis(500));
                 }
-                return Err(ConnectionError::ConnTimeout);
+                Err(ConnectionError::ConnTimeout)
             }
             ConnState::CONNECTED => {
                 // Already connected
-                return Err(ConnectionError::ConnExists);
+                Err(ConnectionError::ConnExists)
             }
         }
     }
@@ -234,9 +234,9 @@ impl Connection {
                     }
                     None => { return Err(ConnectionError::Unknown); }
                 }
-                return Ok(());
+                Ok(())
             },
-            ConnState::DISCON => return Err(ConnectionError::ConnDead)
+            ConnState::DISCON => Err(ConnectionError::ConnDead)
         }
     }
 }
