@@ -1,5 +1,5 @@
 syntax = "proto3";
 
-package string.users;
+package str.users.v1;
 
 message User {}
