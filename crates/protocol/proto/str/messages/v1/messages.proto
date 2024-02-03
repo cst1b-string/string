@@ -3,13 +3,14 @@ syntax = "proto3";
 package str.messages.v1;
 
 message Message {
-	optional string content = 1;
-	repeated MessageAttachment attachments = 2;
+	string id = 1;
+	string channel_id = 2;
+	string username = 3;
+	string content = 4;
+	repeated MessageAttachment attachments = 5;
 }
 
 message MessageAttachment {
-	// The type of the attachment.
-	AttachmentType type = 1;
 	oneof attachment {
 		ImageAttachment image = 2;
 		AudioAttachment audio = 3;

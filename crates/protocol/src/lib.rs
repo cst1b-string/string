@@ -29,10 +29,23 @@ pub mod messages {
     include_protocol!("messages", v1);
 }
 
+/// Defines the crypto buffer types and data.
 pub mod crypto {
     include_protocol!("crypto", v1);
 }
 
+/// Defines the channel buffer types and data.
 pub mod channels {
     include_protocol!("channels", v1);
+}
+
+/// Defines the network buffer types and data.
+pub mod network {
+    include_protocol!("network", v1);
+}
+
+mod tests {
+    use crate::messages::v1::{Message, MessageAttachment};
+
+    fn test() {}
 }
