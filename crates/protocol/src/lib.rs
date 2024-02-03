@@ -43,9 +43,3 @@ pub mod channels {
 pub mod network {
     include_protocol!("network", v1);
 }
-
-mod tests {
-    use crate::messages::v1::{Message, MessageAttachment};
-
-    fn test() {}
-}
