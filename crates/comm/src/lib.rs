@@ -2,241 +2,153 @@
 //!
 //! This crate contains the communication code for string
 
-use std::net::*;
-use std::time::Duration;
-use std::thread;
-use std::borrow::Borrow;
-use thiserror::Error;
+use std::{net::SocketAddr, sync::Arc};
 
-pub enum ConnState {
-    DISCON,
-    CONNECTED,
+use connection::{NetworkPacketType, Peer, PeerState};
+use error::{PacketError, SocketError};
+use protocol::packet::v1::Packet;
+use tokio::{net::UdpSocket, sync::RwLock};
+
+mod connection;
+mod error;
+
+/// The magic number used to identify packets sent over the network.
+const MAGIC: u32 = 0x010203;
+
+/// A UDP packet sent over the network. These packets have the following format:
+///
+/// A header, consisting of:
+/// - 3 bytes: Magic number (0x010203)
+/// - 1 byte: Packet type (0 = SYN, 1 = ACK, 2 = SYNACK, 3 = HEARTBEAT, 4 = DATA)
+/// - 4 bytes: Sequence number
+/// - 4 bytes: Length of the data
+///
+/// Then arbitrary-length data, as defined by the protocol.
+pub struct NetworkPacket {
+    /// The type of packet.
+    packet_type: NetworkPacketType,
+    /// The sequence number of the packet.
+    seq_number: u32,
+    /// The length of the packet
+    data_length: u32,
+    /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
+    data: Vec<u8>,
 }
 
-pub struct Connection {
-    dst_ip: String,
-    dst_port: u16,
-    src_port: u16,
-    socket: Option<UdpSocket>,
-    pub state: ConnState,
-    initiate: bool              // Is this node initiating?
+/// A wrapper around the `UdpSocket` type that provides a higher-level interface for sending and
+/// receiving packets from multiple peers.
+pub struct Socket {
+    /// The inner `UdpSocket` used for sending and receiving packets.
+    inner: Arc<UdpSocket>,
+    /// A list of connections to other peers.
+    peers: Arc<RwLock<Vec<Peer>>>,
 }
 
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum PacketType {
-    SYN,                    // (1) Initiating client sends this
-    ACK,                    // (2) Receiving client sends this back
-    SYNACK,                 // (3) Initiating client sends this
-                            // Now both are connected (ignoring the Two Generals' problem)
-    HEARTBEAT,              // This needs to be sent as frequently as we can
-                            // so the stateful firewall doesn't drop our UDP entry
-    DATA,                   // Actual communication data
-    INVALID
+impl Socket {
+    /// Create a new `Socket` that is bound to the given address.
+    pub async fn bind(addr: SocketAddr) -> Result<Self, SocketError> {
+        // bind to the target address
+        let socket = UdpSocket::bind(addr).await.map_err(SocketError::IoError)?;
+        Ok(Self {
+            inner: Arc::new(socket),
+            peers: Arc::new(RwLock::new(Vec::new())),
+        })
+    }
+
+    /// Add a new peer to the list of connections.
+    pub async fn add_peer(&mut self, addr: SocketAddr) {
+        let mut connections = self.peers.write().await;
+        connections.push(addr.into());
+    }
+
+    /// Spawns a new task to handle heartbeat events.
+    pub async fn spawn_network_task(&self) {
+        let peers = self.peers.clone();
+
+        tokio::spawn(async move {
+            loop {
+                for peer in peers.read().await.iter() {
+                    match peer.state {
+                        PeerState::Disconnected => todo!(),
+                        PeerState::Connecting => todo!(),
+                        PeerState::Connected => todo!(),
+                    }
+                }
+            }
+        });
+    }
+
+    /// Send a packet to the given peer.
+    pub async fn send_packet(
+        &self,
+        packet: &Packet,
+        peer_addr: SocketAddr,
+    ) -> Result<(), SocketError> {
+        let buf = protocol::try_encode_packet(&packet).map_err(|e| SocketError::EncodeFail(e))?;
+        let buf = NetworkPacket::new(NetworkPacketType::Data, 0, &buf).encode();
+
+        self.inner
+            .send_to(&buf, peer_addr)
+            .await
+            .map_err(SocketError::IoError)?;
+        Ok(())
+    }
 }
 
-pub struct Packet {
-    pkttype: PacketType,
-    seqno: u64,             // Currently used for syn/ack in connections only;
-                            // ignored for heartbeat/data
-    data: Option<Vec<u8>>,
-    bytes_: Vec<u8>         // Raw bytes representation of packet
-}
-
-#[derive(Error, Debug)]
-pub enum ConnectionError {
-    #[error("Unknown error")]
-    Unknown,
-    #[error("Connection timed out")]
-    ConnTimeout,
-    #[error("Already connected")]
-    ConnExists,
-    #[error("Not connected")]
-    ConnDead,
-    #[error("Binding to UDP socket failed")]
-    BindFail
-//    MyErr(#[from] TheirErr),
-}
-
-#[derive(Error, Debug)]
-pub enum PacketError {
-    #[error("Unknown error")]
-    Unknown,
-    #[error("Magic number incorrect")]
-    BadMagic,
-    #[error("Unknown packet type")]
-    BadPacketType,
-    #[error("Packet too small")]
-    BadSize
-}
-
-const MAGIC: u32 = 0x01020304;
-
-impl Packet {
-    pub fn new(pkttype: PacketType, seqno: u64, data: Option<Vec<u8>>) -> Self {
+impl NetworkPacket {
+    /// Create a new packet with the given type, sequence number, and data.
+    pub fn new<Data>(packet_type: NetworkPacketType, seq_number: u32, data: Data) -> Self
+    where
+        Data: AsRef<[u8]>,
+    {
         Self {
-            pkttype,
-            seqno,
-            data,
-            bytes_: Vec::new()
+            packet_type,
+            seq_number,
+            data_length: data.as_ref().len() as u32,
+            data: Vec::from(data.as_ref()),
         }
     }
 
-    pub fn bytes(&mut self) -> &[u8] {
-        if self.bytes_.is_empty() {
-            self.bytes_.extend_from_slice(&MAGIC.to_be_bytes());
-            let pkttype: u8 = self.pkttype as u8;
-            self.bytes_.push(pkttype);
-            self.bytes_.extend_from_slice(&self.seqno.to_be_bytes());
-            match &self.data {
-                Some(data) => {
-                    self.bytes_.extend(data);
-                }
-                None => {}
-            }
-        }
-        self.bytes_.as_slice()
+    /// Encode the packet into a byte buffer.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&MAGIC.to_be_bytes());
+        buf.push(self.packet_type as u8);
+        buf.extend_from_slice(&self.seq_number.to_be_bytes());
+        buf.extend_from_slice(&self.data);
+        buf
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Packet, PacketError> {
-        // 4 bytes magic, 1 byte type, 8 bytes seq no.
-        const MIN_PACKET_SIZE: usize = 4 + 1 + 8;
-        if bytes.len() < MIN_PACKET_SIZE {
-            return Err(PacketError::BadSize);
-        }
-        if bytes[..4] == MAGIC.to_be_bytes() {
-            let pkttype: PacketType = match bytes[4] {
-                0 => PacketType::SYN,
-                1 => PacketType::ACK,
-                2 => PacketType::SYNACK,
-                3 => PacketType::HEARTBEAT,
-                4 => PacketType::DATA,
-                _ => { return Err(PacketError::BadPacketType); }
-            };
+    /// Decode a packet from the given byte buffer.
+    pub fn from_bytes(bytes: &[u8]) -> Result<NetworkPacket, PacketError> {
+        todo!("from_bytes - need to consider packet length")
 
-            let seqno:u64 = u64::from_be_bytes(bytes[5..13].try_into().unwrap());
-            // Additional data
-            let mut data: Option<Vec<u8>> = None;
-            if bytes.len() > MIN_PACKET_SIZE {
-                data = Some(bytes[13..].to_vec());
-            }
-            return Ok(Packet::new(pkttype, seqno, data));
-        }
-        Err(PacketError::BadMagic)
-    }
-}
+        // // 4 bytes magic, 1 byte type, 8 bytes seq no.
+        // const MIN_PACKET_SIZE: usize = 4 + 1 + 8;
+        // if bytes.len() < MIN_PACKET_SIZE {
+        //     return Err(PacketError::BadSize);
+        // }
+        // if bytes[..4] == MAGIC.to_be_bytes() {
+        //     let packet_type: NetworkPacketType = match bytes[4] {
+        //         0 => NetworkPacketType::Syn,
+        //         1 => NetworkPacketType::Ack,
+        //         2 => NetworkPacketType::SynAck,
+        //         3 => NetworkPacketType::Heartbeat,
+        //         4 => NetworkPacketType::Data,
+        //         _ => {
+        //             return Err(PacketError::BadPacketType);
+        //         }
+        //     };
 
-impl Connection {
-    pub fn new(ip: &str, dst_port: u16, src_port: u16, initiate: bool) -> Self {
-        Self {
-            state: ConnState::DISCON,
-            socket: None,
-            dst_ip: ip.to_owned(),
-            dst_port,
-            src_port,
-            initiate
-        }
-    }
+        //     let seq_number: u32 = u32::from_be_bytes(bytes[5..13].try_into().unwrap());
+        //     // Additional data
+        //     let mut data: Option<Vec<u8>> = None;
+        //     if bytes.len() > MIN_PACKET_SIZE {
+        //         data = Some(bytes[13..].to_vec());
+        //     }
 
-    pub fn connect(&mut self) -> Result<(), ConnectionError> {
-        match self.state {
-            ConnState::DISCON => {
-                let result = UdpSocket::bind(("0.0.0.0", self.src_port));
-                let socket = match result {
-                    Ok(sock) => sock,
-                    Err(_) => {
-                        // Couldn't bind to the socket
-                        return Err(ConnectionError::BindFail);
-                    }
-                };
-
-                // This cycle moves in 500 ms ticks
-                let _ = socket.set_read_timeout(Some(Duration::from_millis(500)));
-
-                let mut seqno:u64 = 0;
-                let mut seen_seqno:u64 = 0;
-                let mut payload = Packet::new(PacketType::SYN, seqno, None);
-                let mut recv: [u8; 1024] = [0; 1024];
-
-                while seqno < 5 * 60 * 2 {
-                    let _ = socket.send_to(payload.bytes(), (self.dst_ip.borrow(), self.dst_port));
-                    match socket.recv_from(&mut recv) {
-                        Ok((size, _)) => {
-                            let pkt_: Option<Packet> = match Packet::from_bytes(&recv[..size]) {
-                                Ok(p) => Some(p),
-                                Err(_) => None
-                            };
-                            match pkt_ {
-                                Some(pkt) => {
-                                    if self.initiate {
-                                        // If initiating, wait for ACKs
-                                        // On ACK send single SYNACK back
-                                        match pkt.pkttype {
-                                            PacketType::ACK => {
-                                                // Acknowledge something we sent
-                                                if pkt.seqno <= seqno {
-                                                    let mut newpkt = Packet::new(PacketType::SYNACK, pkt.seqno, None);
-                                                    _ = socket.send_to(newpkt.bytes(), (self.dst_ip.borrow(), self.dst_port));
-                                                    self.socket = Some(socket);
-                                                    self.state = ConnState::CONNECTED;
-                                                    return Ok(());
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    else {
-                                        // If receiving side reply ACK to every SYN
-                                        // On receive SYNACK treat connection as established
-                                        match pkt.pkttype {
-                                            PacketType::SYN => {
-                                                let mut newpkt = Packet::new(PacketType::ACK, pkt.seqno, None);
-                                                _ = socket.send_to(newpkt.bytes(), (self.dst_ip.borrow(), self.dst_port));
-                                                if pkt.seqno > seen_seqno { seen_seqno = pkt.seqno; }
-                                            },
-                                            PacketType::SYNACK => {
-                                                // Something we've seen before
-                                                if pkt.seqno <= seen_seqno {
-                                                    self.socket = Some(socket);
-                                                    self.state = ConnState::CONNECTED;
-                                                    return Ok(());
-                                                }
-                                            },
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                                None => {}
-                            };
-                        }
-                        Err(_) => {},
-                    }
-                    seqno += 1;
-                    payload = Packet::new(PacketType::SYN, seqno, None);
-                    thread::sleep(Duration::from_millis(500));
-                }
-                Err(ConnectionError::ConnTimeout)
-            }
-            ConnState::CONNECTED => {
-                // Already connected
-                Err(ConnectionError::ConnExists)
-            }
-        }
-    }
-
-    pub fn heartbeat(&mut self) -> Result<(), ConnectionError> {
-        match self.state {
-            ConnState::CONNECTED => {
-                match &self.socket {
-                    Some(socket) => {
-                        let mut pkt = Packet::new(PacketType::HEARTBEAT, 0, None);
-                        let _ = socket.send_to(pkt.bytes(), (self.dst_ip.borrow(), self.dst_port));
-                    }
-                    None => { return Err(ConnectionError::Unknown); }
-                }
-                Ok(())
-            },
-            ConnState::DISCON => Err(ConnectionError::ConnDead)
-        }
+        //     return Ok(NetworkPacket::new(packet_type, seq_number, data));
+        // }
+        // Err(PacketError::BadMagic)
     }
 }

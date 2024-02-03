@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "apps/desktop/src-tauri", "services/lighthouse", "tools/prisma-cli"]
+members = ["crates/*", "apps/desktop/src-tauri", "services/lighthouse", "tools/prisma-cli", "tools/comm-test"]
 
 [workspace.dependencies]
 anyhow = "1"

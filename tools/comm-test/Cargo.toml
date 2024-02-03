@@ -3,8 +3,5 @@ name = "comm-test"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-members = []
-
 [dependencies]
-comm = { path = "../crates/comm" }
+comm = { path = "../../crates/comm" }
