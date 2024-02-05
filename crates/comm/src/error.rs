@@ -26,4 +26,6 @@ pub enum PacketError {
     BadPacketType,
     #[error("Packet too small")]
     BadSize,
+    #[error("Encountered an IO error")]
+    IoError(#[from] std::io::Error),
 }

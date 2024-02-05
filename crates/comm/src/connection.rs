@@ -176,3 +176,16 @@ pub enum NetworkPacketType {
     /// An invalid packet.
     Invalid,
 }
+
+impl From<u8> for NetworkPacketType {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => NetworkPacketType::Syn,
+            1 => NetworkPacketType::Ack,
+            2 => NetworkPacketType::SynAck,
+            3 => NetworkPacketType::Heartbeat,
+            4 => NetworkPacketType::Data,
+            _ => NetworkPacketType::Invalid,
+        }
+    }
+}

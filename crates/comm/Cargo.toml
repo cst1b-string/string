@@ -7,4 +7,6 @@ edition = "2021"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
+byteorder = "1"
+
 protocol = { path = "../protocol" }
