@@ -28,6 +28,7 @@ impl Socket {
     pub async fn bind(addr: SocketAddr) -> Result<Self, SocketError> {
         // bind to the target address
         let socket = UdpSocket::bind(addr).await.map_err(SocketError::IoError)?;
+
         Ok(Self {
             inner: Arc::new(socket),
             peers: Arc::new(RwLock::new(Vec::new())),
