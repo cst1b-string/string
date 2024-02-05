@@ -1,7 +1,7 @@
 export const ChatButton = () => {
 	return (
-		<button className="bg-white text-[#191970] px-4 py-2 rounded-md">
-			New Chat
+		<button className="bg-[#3399FF] text-[white] w-full py-4">
+			New Chat +
 		</button>
 	);
 }
