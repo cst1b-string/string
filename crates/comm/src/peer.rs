@@ -36,6 +36,12 @@ impl Peer {
         }
     }
 
+    /// Receive a packet from the peer.
+    pub fn receive_packet() {}
+
+    /// Send a packet to the peer.
+    pub fn send_packet() {}
+
     pub fn connect(&mut self) -> Result<(), ConnectionError> {
         match self.state {
             PeerState::Disconnected => {

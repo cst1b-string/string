@@ -2,7 +2,7 @@
 //!
 //! This crate contains the communication code for string
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use error::SocketError;
 use packet::{NetworkPacket, NetworkPacketType};
@@ -10,7 +10,7 @@ use peer::Peer;
 use protocol::packet::v1::Packet;
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, Mutex, RwLock},
+    sync::{mpsc, RwLock},
 };
 
 mod error;
@@ -22,59 +22,56 @@ mod peer;
 pub struct Socket {
     /// The inner [UdpSocket] used for sending and receiving packets.
     inner: Arc<UdpSocket>,
-    /// A list of connections to other peers.
-    peers: Arc<RwLock<Vec<Peer>>>,
+    /// A map of connections to other peers.
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
     /// The send half of the packet transmission channel.
-    packet_tx: mpsc::Sender<Packet>,
-    /// The receive half of the packet transmission channel.
-    packet_rx: Arc<Mutex<mpsc::Receiver<Packet>>>,
+    packet_tx: mpsc::Sender<NetworkPacket>,
 }
 
 impl Socket {
-    /// Create a new `Socket` that is bound to the given address.
+    /// Create a new `Socket` that is bound to the given address. This method also
+    /// starts the background tasks that handle sending and receiving packets.
     pub async fn bind(addr: SocketAddr) -> Result<Self, SocketError> {
-        let socket = UdpSocket::bind(addr).await.map_err(SocketError::IoError)?;
-        let (packet_tx, packet_rx) = mpsc::channel(32);
+        // bind socket
+        let socket: Arc<_> = UdpSocket::bind(addr)
+            .await
+            .map_err(SocketError::IoError)?
+            .into();
 
-        Ok(Self {
-            inner: Arc::new(socket),
-            packet_tx,
-            packet_rx: Arc::new(Mutex::new(packet_rx)),
-            peers: Arc::new(RwLock::new(Vec::new())),
-        })
-    }
+        // create peers map
+        let peers = Arc::new(RwLock::new(HashMap::new()));
 
-    /// Returns a clone of the sender half of the packet transmission channel. This
-    /// is used to send packets to the network.
-    pub fn sender(&self) -> mpsc::Sender<Packet> {
-        self.packet_tx.clone()
-    }
+        // create mpsc channel for packet transmission
+        let (packet_tx, mut packet_rx) = mpsc::channel(32);
 
-    /// Add a new peer to the list of connections.
-    pub async fn add_peer(&mut self, addr: SocketAddr) {
-        let mut connections = self.peers.write().await;
-        connections.push(addr.into());
-    }
-
-    /// Spawns a new task to handle heartbeat events.
-    pub async fn spawn_network_task(&self) {
-        let socket = self.inner.clone();
-        let peers = self.peers.clone();
-        let packet_rx = self.packet_rx.clone();
-
-        // outbound packet task
+        // outbound packet task - uses `packet_rx` to process outbound packets
+        let outbound_peers = peers.clone();
+        let outbound_socket = socket.clone();
         tokio::spawn(async move {
+            let socket = outbound_socket;
+            let peers = outbound_peers;
+
             loop {
-                let packet = match packet_rx.lock().await.recv().await {
+                let packet = match packet_rx.recv().await {
                     Some(packet) => packet,
                     None => break,
                 };
-                todo!("send packet to peer")
+
+                // lookup peer
+                let peer = match peers.read().await.get(&packet.addr) {
+					Some(peer) => peer,
+					None => {
+						eprintln!("Unknown peer: {:?}", packet.addr);
+						continue;
+					}
+				}
             }
         });
 
         // inbound packet task
+        let inbound_socket = socket.clone();
         tokio::spawn(async move {
+            let socket = inbound_socket;
             let mut buf = [0; 1024];
             loop {
                 // wait for socket to be readable
@@ -93,23 +90,32 @@ impl Socket {
                 };
             }
         });
+
+        Ok(Self {
+            inner: socket,
+            packet_tx,
+            peers,
+        })
+    }
+
+    /// Add a new peer to the list of connections.
+    pub async fn add_peer(&mut self, addr: SocketAddr) {
+        let mut connections = self.peers.write().await;
+        connections.insert(addr, addr.into());
     }
 
     /// Send a packet to the given peer.
     pub async fn send_packet(
         &self,
-        packet: &Packet,
+        packet: Packet,
         peer_addr: SocketAddr,
     ) -> Result<(), SocketError> {
         // encode protocol message, then wrap in frame
         let buf = protocol::try_encode_packet(&packet).map_err(|e| SocketError::EncodeFail(e))?;
-        let buf = NetworkPacket::new(NetworkPacketType::Data, 0, &buf).encode()?;
+        let packet = NetworkPacket::new(NetworkPacketType::Data, 0, &buf);
 
-        // send datagram
-        self.inner
-            .send_to(&buf, peer_addr)
-            .await
-            .map_err(SocketError::IoError)?;
+        // forward to network thread
+        self.packet_tx.send(packet).await?;
 
         Ok(())
     }

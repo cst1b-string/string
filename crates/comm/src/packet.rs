@@ -24,13 +24,13 @@ const MIN_PACKET_SIZE: usize = 4 + 1 + 4 + 4;
 /// Then arbitrary-length data, as defined by the protocol.
 pub struct NetworkPacket {
     /// The type of packet.
-    packet_type: NetworkPacketType,
+    pub packet_type: NetworkPacketType,
     /// The sequence number of the packet.
-    seq_number: u32,
+    pub seq_number: u32,
     /// The length of the packet
-    data_length: u32,
+    pub data_length: u32,
     /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// An enumeration of the different types of network packets.
