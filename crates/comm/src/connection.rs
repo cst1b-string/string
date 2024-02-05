@@ -159,33 +159,3 @@ impl Peer {
         }
     }
 }
-
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NetworkPacketType {
-    /// Packets sent by the initiating peer.
-    Syn,
-    /// Packets sent by a receiving peer.
-    Ack,
-    /// Packets sent by the initiating peer after receiving an ACK. Once this is sent, the connection is established.
-    SynAck,
-    /// Packets sent by either peer to keep the connection alive. This is done to avoid stateful firewalls from dropping the connection.
-    Heartbeat,
-    /// Actual communication data
-    Data,
-    /// An invalid packet.
-    Invalid,
-}
-
-impl From<u8> for NetworkPacketType {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => NetworkPacketType::Syn,
-            1 => NetworkPacketType::Ack,
-            2 => NetworkPacketType::SynAck,
-            3 => NetworkPacketType::Heartbeat,
-            4 => NetworkPacketType::Data,
-            _ => NetworkPacketType::Invalid,
-        }
-    }
-}
