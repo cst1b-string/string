@@ -138,9 +138,13 @@ impl NetworkPacket {
     }
 
     /// Decode a packet from the given byte buffer.
-    pub fn from_bytes(bytes: &[u8]) -> Result<NetworkPacket, PacketError> {
-        // check minimum packet length
+    pub fn decode<Data>(bytes: Data) -> Result<NetworkPacket, PacketError>
+    where
+        Data: AsRef<[u8]>,
+    {
+        let bytes = bytes.as_ref();
 
+        // check minimum packet length
         if bytes.len() < MIN_PACKET_SIZE {
             return Err(PacketError::BadSize);
         }
