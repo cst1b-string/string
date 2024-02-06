@@ -1,50 +1,118 @@
 //! This module defines `Connection`, which manages the passing of data between two peers.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+use tokio::{
+    net::UdpSocket,
+    sync::{mpsc, RwLock},
+};
+
+use crate::{
+    error::PacketError,
+    packet::{NetworkPacket, NetworkPacketType},
+};
 
 /// The state of a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerState {
-    Disconnected,
-    Connecting,
-    Connected,
+    Init,
+    Connect,
+    Established,
+    Dead,
 }
 
 /// Represents a connection to a remote peer. All communication between peers is done using a
 /// shared UDP socket.
+#[derive(Debug)]
 pub struct Peer {
     /// The destination address.
     pub destination: SocketAddr,
     /// The state of the connection.
-    pub state: PeerState,
-}
-
-impl From<SocketAddr> for Peer {
-    fn from(destination: SocketAddr) -> Self {
-        Self {
-            destination,
-            state: PeerState::Disconnected,
-        }
-    }
+    state: PeerState,
+    /// The sequence number of the last packet sent.
+    seq_number: u64,
+    /// The inbound packet channel. This is used to receive packets from the peer.
+    pub inbound_packet_tx: mpsc::Sender<NetworkPacket>,
 }
 
 impl Peer {
     /// Create a new connection to the given destination.
-    pub fn new(destination: SocketAddr) -> Self {
-        Self {
-            destination,
-            state: PeerState::Connecting,
-        }
+    pub fn new(
+        socket: Arc<UdpSocket>,
+        destination: SocketAddr,
+    ) -> (Self, mpsc::Receiver<NetworkPacket>) {
+        // channels for sending and receiving packets
+        let (inbound_packet_tx, inbound_packet_rx) = mpsc::channel(32);
+        let (outbound_packet_tx, outbound_packet_rx) = mpsc::channel(32);
+
+        // state
+        let state = Arc::new(RwLock::new(PeerState::Init));
+
+        // peer packet receiver
+        let inbound_state = state.clone();
+        tokio::task::spawn(async {
+            let state = inbound_state;
+            loop {
+                // receive packet from network
+                let packet: NetworkPacket = match inbound_packet_rx.recv().await {
+                    Some(packet) => packet,
+                    None => break,
+                };
+
+                match { *state.read().await } {
+                    PeerState::Init => {
+                        // handle initial packets
+                        match packet.packet_type {
+                            NetworkPacketType::Syn => todo!(),
+                            NetworkPacketType::SynAck => todo!(),
+                            NetworkPacketType::Ack => todo!(),
+                            NetworkPacketType::Heartbeat => todo!(),
+                            NetworkPacketType::Data => todo!(),
+                            NetworkPacketType::Invalid => todo!(),
+                        }
+                    }
+                    PeerState::Connect => todo!(),
+                    PeerState::Established => todo!(),
+                    PeerState::Dead => todo!(),
+                }
+            }
+        });
+
+        // peer packet sender
+        let outbound_state = state.clone();
+        tokio::task::spawn(async {
+            loop {
+                // ensure we're in a state where we can send packets
+                if { *outbound_state.read().await } != PeerState::Established {
+                    tokio::time::sleep(Duration::from_millis(500)).await
+                }
+                // receive packet from queue
+                let packet = match outbound_packet_rx.recv().await {
+                    Some(packet) => packet,
+                    None => break,
+                };
+            }
+        });
+
+        (
+            Self {
+                destination,
+                state: PeerState::Connect,
+                seq_number: 0,
+                inbound_packet_tx,
+            },
+            outbound_packet_rx,
+        )
     }
 
-    /// Receive a packet from the peer.
-    pub fn receive_packet() {}
-
     /// Send a packet to the peer.
-    pub fn send_packet() {}
+    pub fn send_packet(&mut self, packet: NetworkPacket) -> Result<(), PacketError> {
+        self.inbound_packet_tx.send(packet).await
+    }
 
     pub fn connect(&mut self) -> Result<(), ConnectionError> {
         match self.state {
-            PeerState::Disconnected => {
+            PeerState::Init => {
                 // This cycle moves in 500 ms ticks
                 let _ = socket.set_read_timeout(Some(Duration::from_millis(500)));
 
@@ -92,7 +160,7 @@ impl Peer {
                                                         ),
                                                     );
                                                     self.socket = Some(socket);
-                                                    self.state = PeerState::Connected;
+                                                    self.state = PeerState::Established;
                                                     return Ok(());
                                                 }
                                             }
@@ -120,7 +188,7 @@ impl Peer {
                                                 // Something we've seen before
                                                 if pkt.sequence_number <= seen_seqno {
                                                     self.socket = Some(socket);
-                                                    self.state = PeerState::Connected;
+                                                    self.state = PeerState::Established;
                                                     return Ok(());
                                                 }
                                             }
@@ -139,7 +207,7 @@ impl Peer {
                 }
                 Err(ConnectionError::ConnTimeout)
             }
-            PeerState::Connected => {
+            PeerState::Established => {
                 // Already connected
                 Err(ConnectionError::ConnExists)
             }
@@ -148,7 +216,7 @@ impl Peer {
 
     pub fn heartbeat(&mut self) -> Result<(), ConnectionError> {
         match self.state {
-            PeerState::Connected => {
+            PeerState::Established => {
                 match &self.socket {
                     Some(socket) => {
                         let mut pkt = Packet::new(NetworkPacketType::Heartbeat, 0, None);
@@ -161,7 +229,7 @@ impl Peer {
                 }
                 Ok(())
             }
-            PeerState::Disconnected => Err(ConnectionError::ConnDead),
+            PeerState::Init => Err(ConnectionError::ConnDead),
         }
     }
 }

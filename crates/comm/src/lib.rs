@@ -52,26 +52,30 @@ impl Socket {
             let peers = outbound_peers;
 
             loop {
-                let packet = match packet_rx.recv().await {
+                let packet: NetworkPacket = match packet_rx.recv().await {
                     Some(packet) => packet,
                     None => break,
                 };
 
                 // lookup peer
                 let peer = match peers.read().await.get(&packet.addr) {
-					Some(peer) => peer,
-					None => {
-						eprintln!("Unknown peer: {:?}", packet.addr);
-						continue;
-					}
-				}
+                    Some(peer) => peer,
+                    None => {
+                        eprintln!("Unknown peer: {:?}", packet.addr);
+                        continue;
+                    }
+                };
+
+                peer.inbound_packet_tx.send(packet).await;
             }
         });
 
         // inbound packet task
         let inbound_socket = socket.clone();
+        let inbound_packet_tx = packet_tx.clone();
         tokio::spawn(async move {
             let socket = inbound_socket;
+            let packet_tx = inbound_packet_tx;
             let mut buf = [0; 1024];
             loop {
                 // wait for socket to be readable
@@ -80,7 +84,7 @@ impl Socket {
                     break;
                 }
 
-                // iterate over all peers and read packets
+                // receive packet
                 let (size, addr) = match socket.recv_from(&mut buf).await {
                     Ok((size, addr)) => (size, addr),
                     Err(e) => {
@@ -88,6 +92,28 @@ impl Socket {
                         continue;
                     }
                 };
+
+                // see if we know this peer
+                let mut peers = peers.write().await;
+                let peer = match peers.get_mut(&addr) {
+                    Some(peer) => peer,
+                    None => {
+                        eprintln!("Unknown peer: {:?}", addr);
+                        continue;
+                    }
+                };
+
+                // decode network packet
+                let packet = match NetworkPacket::decode(&buf[..size]) {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        eprintln!("Error decoding packet: {:?}", e);
+                        continue;
+                    }
+                };
+
+                // forward to peer
+                peer.packet_tx.send(packet).await;
             }
         });
 
@@ -101,7 +127,8 @@ impl Socket {
     /// Add a new peer to the list of connections.
     pub async fn add_peer(&mut self, addr: SocketAddr) {
         let mut connections = self.peers.write().await;
-        connections.insert(addr, addr.into());
+        let peer = Peer::new(self.inner.clone(), addr);
+        connections.insert(addr, peer);
     }
 
     /// Send a packet to the given peer.
