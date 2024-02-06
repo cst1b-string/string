@@ -33,6 +33,8 @@ pub struct Peer {
     seq_number: u64,
     /// The inbound packet channel. This is used to receive packets from the peer.
     pub inbound_packet_tx: mpsc::Sender<NetworkPacket>,
+    /// The outbound packet channel. This is used to send packets to the peer.
+    pub outbound_packet_tx: mpsc::Sender<NetworkPacket>,
 }
 
 impl Peer {
@@ -82,7 +84,10 @@ impl Peer {
                                     data_length: 0,
                                 };
                                 // write to network
-                                network_packet_tx.send(synack).await;
+                                match network_packet_tx.send(synack).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
+                                };
                                 // transition to established state
                                 *state.write().await = PeerState::Established;
                             }
@@ -104,7 +109,10 @@ impl Peer {
                                     data_length: 0,
                                 };
                                 // write to network
-                                network_packet_tx.send(ack).await;
+                                match network_packet_tx.send(ack).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
+                                }
                             }
                             NetworkPacketType::SynAck => {
                                 // transition to established state
@@ -124,7 +132,10 @@ impl Peer {
                         | NetworkPacketType::Invalid => {}
                         NetworkPacketType::Data => {
                             // forward packet to application
-                            inbound_packet_tx.send(packet).await;
+                            match inbound_packet_tx.send(packet).await {
+                                Ok(_) => {}
+                                Err(_) => break,
+                            }
                         }
                     },
                     PeerState::Dead => break,
@@ -141,10 +152,19 @@ impl Peer {
                     tokio::time::sleep(Duration::from_millis(500)).await
                 }
                 // receive packet from queue
-                let packet = match outbound_packet_rx.recv().await {
+                let packet: NetworkPacket = match outbound_packet_rx.recv().await {
                     Some(packet) => packet,
                     None => break,
                 };
+                let buf = match packet.encode() {
+                    Ok(buf) => buf,
+                    Err(_) => break,
+                };
+                // write to network
+                match socket.send_to(&buf, destination).await {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
             }
         });
 
@@ -154,6 +174,7 @@ impl Peer {
                 state: PeerState::Connect,
                 seq_number: 0,
                 inbound_packet_tx,
+                outbound_packet_tx,
             },
             network_packet_rx,
         )
@@ -161,7 +182,7 @@ impl Peer {
 
     /// Send a packet to the peer.
     pub async fn send_packet(&mut self, packet: NetworkPacket) -> Result<(), PeerError> {
-        self.inbound_packet_tx.send(packet).await?;
+        self.outbound_packet_tx.send(packet).await?;
         Ok(())
     }
 }
