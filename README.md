@@ -31,5 +31,5 @@ in the root directory of the project.
 
 ## License
 
-This project is licensed under a dual MIT and Apache 3.0 license. See [LICENSE-MIT](./LICENSE-MIT)
-and [LICENSE-APACHE-2.0](./LICENSE-APACHE-2.0) for details.
+This project is licensed under the GNU Affero General Public License v3.0 - see the
+[LICENSE](LICENSE) file for details.
