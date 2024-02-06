@@ -5,9 +5,9 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use error::SocketError;
-use packet::{NetworkPacket, NetworkPacketType};
+use packet::NetworkPacket;
 use peer::Peer;
-use protocol::packet::v1::Packet;
+
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
@@ -25,7 +25,7 @@ pub struct Socket {
     /// A map of connections to other peers.
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
     /// The send half of the packet transmission channel.
-    packet_tx: mpsc::Sender<NetworkPacket>,
+    packet_tx: mpsc::Sender<(SocketAddr, NetworkPacket)>,
 }
 
 impl Socket {
@@ -46,22 +46,20 @@ impl Socket {
 
         // outbound packet task - uses `packet_rx` to process outbound packets
         let outbound_peers = peers.clone();
-        let outbound_socket = socket.clone();
         tokio::spawn(async move {
-            let socket = outbound_socket;
             let peers = outbound_peers;
 
             loop {
-                let packet: NetworkPacket = match packet_rx.recv().await {
-                    Some(packet) => packet,
+                let (addr, packet) = match packet_rx.recv().await {
+                    Some(p) => p,
                     None => break,
                 };
-
                 // lookup peer
-                let peer = match peers.read().await.get(&packet.addr) {
+                let peers = peers.read().await;
+                let peer: &Peer = match peers.get(&addr) {
                     Some(peer) => peer,
                     None => {
-                        eprintln!("Unknown peer: {:?}", packet.addr);
+                        eprintln!("Unknown peer: {:?}", addr);
                         continue;
                     }
                 };
@@ -72,10 +70,10 @@ impl Socket {
 
         // inbound packet task
         let inbound_socket = socket.clone();
-        let inbound_packet_tx = packet_tx.clone();
+        let inbound_peers = peers.clone();
         tokio::spawn(async move {
             let socket = inbound_socket;
-            let packet_tx = inbound_packet_tx;
+            let peers = inbound_peers;
             let mut buf = [0; 1024];
             loop {
                 // wait for socket to be readable
@@ -113,7 +111,7 @@ impl Socket {
                 };
 
                 // forward to peer
-                peer.packet_tx.send(packet).await;
+                peer.inbound_packet_tx.send(packet).await;
             }
         });
 

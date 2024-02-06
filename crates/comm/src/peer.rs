@@ -8,7 +8,7 @@ use tokio::{
 };
 
 use crate::{
-    error::{PacketError, PeerError},
+    error::PeerError,
     packet::{NetworkPacket, NetworkPacketType},
 };
 
@@ -43,8 +43,9 @@ impl Peer {
         initiate: bool,
     ) -> (Self, mpsc::Receiver<NetworkPacket>) {
         // channels for sending and receiving packets
-        let (inbound_packet_tx, inbound_packet_rx) = mpsc::channel(32);
-        let (outbound_packet_tx, outbound_packet_rx) = mpsc::channel(32);
+        let (inbound_packet_tx, mut inbound_packet_rx) = mpsc::channel(32);
+        let (outbound_packet_tx, mut outbound_packet_rx) = mpsc::channel(32);
+        let (network_packet_tx, network_packet_rx) = mpsc::channel(32);
 
         // state
         let state = Arc::new(RwLock::new(match initiate {
@@ -54,8 +55,12 @@ impl Peer {
 
         // peer packet receiver
         let inbound_state = state.clone();
-        tokio::task::spawn(async {
+        let receiver_inbound_packet_tx = inbound_packet_tx.clone();
+        let receiver_network_packet_tx = network_packet_tx.clone();
+        tokio::task::spawn(async move {
             let state = inbound_state;
+            let inbound_packet_tx = receiver_inbound_packet_tx;
+            let network_packet_tx = receiver_network_packet_tx;
             loop {
                 // receive packet from network
                 let packet: NetworkPacket = match inbound_packet_rx.recv().await {
@@ -76,6 +81,8 @@ impl Peer {
                                     data: vec![],
                                     data_length: 0,
                                 };
+                                // write to network
+                                network_packet_tx.send(synack).await;
                                 // transition to established state
                                 *state.write().await = PeerState::Established;
                             }
@@ -90,20 +97,16 @@ impl Peer {
                                 // responder never receives ACK
                             }
                             NetworkPacketType::Syn => {
-                                let synack = NetworkPacket {
-                                    packet_type: NetworkPacketType::SynAck,
-                                    seq_number: packet.seq_number + 1,
-                                    data: vec![],
-                                    data_length: 0,
-                                };
-                            }
-                            NetworkPacketType::SynAck => {
                                 let ack = NetworkPacket {
                                     packet_type: NetworkPacketType::Ack,
                                     seq_number: packet.seq_number + 1,
                                     data: vec![],
                                     data_length: 0,
                                 };
+                                // write to network
+                                network_packet_tx.send(ack).await;
+                            }
+                            NetworkPacketType::SynAck => {
                                 // transition to established state
                                 *state.write().await = PeerState::Established;
                             }
@@ -131,7 +134,7 @@ impl Peer {
 
         // peer packet sender
         let outbound_state = state.clone();
-        tokio::task::spawn(async {
+        tokio::task::spawn(async move {
             loop {
                 // ensure we're in a state where we can send packets
                 if { *outbound_state.read().await } != PeerState::Established {
@@ -152,7 +155,7 @@ impl Peer {
                 seq_number: 0,
                 inbound_packet_tx,
             },
-            outbound_packet_rx,
+            network_packet_rx,
         )
     }
 
