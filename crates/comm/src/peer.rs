@@ -27,10 +27,6 @@ pub enum PeerState {
 pub struct Peer {
     /// The destination address.
     pub destination: SocketAddr,
-    /// The state of the connection.
-    state: PeerState,
-    /// The sequence number of the last packet sent.
-    seq_number: u64,
     /// The inbound packet channel. This is used to receive packets from the peer.
     pub inbound_packet_tx: mpsc::Sender<NetworkPacket>,
     /// The outbound packet channel. This is used to send packets to the peer.
@@ -171,8 +167,6 @@ impl Peer {
         (
             Self {
                 destination,
-                state: PeerState::Connect,
-                seq_number: 0,
                 inbound_packet_tx,
                 outbound_packet_tx,
             },
