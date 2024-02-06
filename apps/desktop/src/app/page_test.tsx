@@ -14,6 +14,10 @@ export default function Home() {
 					<code className="font-mono font-bold">String, </code>
 					&nbsp;a decentralised social network.
 				</p>
+
+			<div className="font-mono text-sm">
+				<p className="justify-center border-b border-gray-300 bg-gradient-to-b from zinc-200"> Test pn</p>
+			</div>
 				
 			</div>
 		</main>
