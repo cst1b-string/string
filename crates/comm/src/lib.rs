@@ -127,22 +127,20 @@ impl Socket {
     /// Add a new peer to the list of connections.
     pub async fn add_peer(&mut self, addr: SocketAddr) {
         let mut connections = self.peers.write().await;
-        let peer = Peer::new(self.inner.clone(), addr);
+        let (peer, _) = Peer::new(self.inner.clone(), addr, false);
         connections.insert(addr, peer);
     }
 
     /// Send a packet to the given peer.
     pub async fn send_packet(
-        &self,
-        packet: Packet,
+        &mut self,
+        packet: NetworkPacket,
         peer_addr: SocketAddr,
     ) -> Result<(), SocketError> {
-        // encode protocol message, then wrap in frame
-        let buf = protocol::try_encode_packet(&packet).map_err(|e| SocketError::EncodeFail(e))?;
-        let packet = NetworkPacket::new(NetworkPacketType::Data, 0, &buf);
-
-        // forward to network thread
-        self.packet_tx.send(packet).await?;
+        // lookup the peer
+        let mut peers = self.peers.write().await;
+        let peer = peers.get_mut(&peer_addr).ok_or(SocketError::Unknown)?;
+        peer.send_packet(packet).await?;
 
         Ok(())
     }

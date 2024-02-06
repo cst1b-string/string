@@ -1,6 +1,9 @@
 //! Defines the various error types used in this crate.
 
 use thiserror::Error;
+use tokio::sync::mpsc::error::SendError;
+
+use crate::packet::NetworkPacket;
 
 /// An enumeration of possible errors that can occur when working with the socket.
 #[derive(Error, Debug)]
@@ -23,6 +26,9 @@ pub enum SocketError {
     /// A packet failed to encode.
     #[error("Failed to encode packet")]
     EncodeFail(#[from] protocol::prost::EncodeError),
+    /// A peer operation failed.
+    #[error("Failed to process peer operation")]
+    PeerError(#[from] PeerError),
 }
 
 /// An enumeration of possible errors that can occur when working with packets.
@@ -43,4 +49,12 @@ pub enum PacketError {
     /// An IO operation failed.
     #[error("Encountered an IO error")]
     IoError(#[from] std::io::Error),
+}
+
+/// An enumeration of possible errors that can occur when working with peers.
+#[derive(Error, Debug)]
+pub enum PeerError {
+    // Failed to send packet between threads.
+    #[error("Failed to send packet between threads")]
+    SendFail(#[from] SendError<NetworkPacket>),
 }
