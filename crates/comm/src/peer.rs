@@ -77,7 +77,8 @@ impl Peer {
                                     packet_type: NetworkPacketType::SynAck,
                                     seq_number: packet.seq_number + 1,
                                     data: vec![],
-                                    data_length: 0,
+									compressed_data_length: 0,
+                                    uncompressed_data_length: 0,
                                 };
                                 // write to network
                                 match network_packet_tx.send(synack).await {
@@ -102,7 +103,8 @@ impl Peer {
                                     packet_type: NetworkPacketType::Ack,
                                     seq_number: packet.seq_number + 1,
                                     data: vec![],
-                                    data_length: 0,
+									compressed_data_length: 0,
+                                    uncompressed_data_length: 0,
                                 };
                                 // write to network
                                 match network_packet_tx.send(ack).await {
@@ -145,7 +147,8 @@ impl Peer {
             loop {
                 // ensure we're in a state where we can send packets
                 if { *outbound_state.read().await } != PeerState::Established {
-                    tokio::time::sleep(Duration::from_millis(500)).await
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+					continue;
                 }
                 // receive packet from queue
                 let packet: NetworkPacket = match outbound_packet_rx.recv().await {

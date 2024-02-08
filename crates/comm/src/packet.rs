@@ -1,9 +1,9 @@
 //! Defines the packet format used for communication between peers.
 
-use std::io::{self, Cursor, Read, Write};
-
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use protocol::{packet::v1::Packet, prost::DecodeError, try_decode_packet};
+use std::io::{self, Cursor, Error, Read, Write};
 
 use crate::error::PacketError;
 
@@ -11,6 +11,7 @@ use crate::error::PacketError;
 const MAGIC: u32 = 0x010203;
 
 /// The minimum size of an encoded [NetworkPacket].
+/// 4 bytes for MAGIC number, 1 for packet_type, 4 for seq_number, 4 for compressed_data_length, 4 for uncompressed_data_length
 const MIN_PACKET_SIZE: usize = 4 + 1 + 4 + 4;
 
 /// A UDP packet sent over the network. These packets have the following format:
@@ -27,8 +28,10 @@ pub struct NetworkPacket {
     pub packet_type: NetworkPacketType,
     /// The sequence number of the packet.
     pub seq_number: u32,
+    /// The compressed length of the packet
+    pub compressed_data_length: u32,
     /// The length of the packet
-    pub data_length: u32,
+    pub uncompressed_data_length: u32,
     /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
     pub data: Vec<u8>,
 }
@@ -66,16 +69,25 @@ impl From<u8> for NetworkPacketType {
 
 impl NetworkPacket {
     /// Create a new packet with the given type, sequence number, and data.
-    pub fn new<Data>(packet_type: NetworkPacketType, seq_number: u32, data: Data) -> Self
+	/// NOTE: compresses the sent data
+    pub fn new<Data>(
+        packet_type: NetworkPacketType,
+        seq_number: u32,
+        data: Data,
+    ) -> io::Result<Self>
     where
         Data: AsRef<[u8]>,
     {
-        Self {
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(Data);
+        let compressed_data = e.finish()?;
+        Ok(Self {
             packet_type,
             seq_number,
-            data_length: data.as_ref().len() as u32,
-            data: Vec::from(data.as_ref()),
-        }
+            compressed_data_length: compressed_data.len() as u32,
+            uncompressed_data_length: data.as_ref().len() as u32,
+            data: compressed_data,
+        })
     }
 
     /// Encode the packet into a byte buffer.
@@ -86,7 +98,8 @@ impl NetworkPacket {
         buf.write_u24::<BigEndian>(MAGIC)?;
         buf.write_u8(self.packet_type as u8)?;
         buf.write_u32::<BigEndian>(self.seq_number)?;
-        buf.write_u32::<BigEndian>(self.data_length)?;
+        buf.write_u32::<BigEndian>(self.compressed_data_length)?;
+        buf.write_u32::<BigEndian>(self.uncompressed_data_length)?;
 
         // write data
         buf.write_all(&self.data)?;
@@ -118,25 +131,32 @@ impl NetworkPacket {
         // read packet header
         let packet_type = reader.read_u8()?.into();
         let seq_number = reader.read_u32::<BigEndian>()?;
-        let data_length = reader.read_u32::<BigEndian>()?;
+        let compressed_data_length = reader.read_u32::<BigEndian>()?;
+        let uncompressed_data_length = reader.read_u32::<BigEndian>()?;
 
-        if (data_length as usize) == 0 {
+        if (uncompressed_data_length as usize) == 0 {
             return Ok(NetworkPacket {
                 packet_type,
                 seq_number,
-                data_length,
+				compressed_data_length,
+                uncompressed_data_length,
                 data: vec![],
             });
         }
 
-        // read data
-        let mut data = vec![0; data_length as usize];
-        reader.read_exact(&mut data)?;
-
+        // read compressed data
+        let mut compressed_data = vec![0; compressed_data_length as usize];
+        reader.read_exact(&mut compressed_data)?;
+		
+		let mut data = vec![0; uncompressed_data_length as usize];
+		let mut gz_decoder = GzDecoder::new(&compressed_data[..]);
+		gz_decoder.read_exact(&mut data)?;
+		
         Ok(NetworkPacket {
             packet_type,
             seq_number,
-            data_length,
+			compressed_data_length,
+            uncompressed_data_length,
             data,
         })
     }
