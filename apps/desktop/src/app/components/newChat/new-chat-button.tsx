@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const ChatButton = () => {
+export const NewChatButton = () => {
 	return (
 		<Link href="/chat">
 			<button className="bg-[#3399FF] text-[white] w-full py-4">

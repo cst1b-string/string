@@ -1,9 +1,11 @@
-import { Chat } from './components/newChat';
+import { ExistingChat } from './components/existingChat';
+import { NewChat } from './components/newChat';
 
 export default function Home() {
 	return (
 		<div>
-			< Chat />
+			< NewChat />
+			< ExistingChat />
 		</div>
 	);
 }

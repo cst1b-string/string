@@ -1,9 +1,9 @@
-import { ChatButton } from "./chat-button";
+import { NewChatButton } from "./new-chat-button";
 
-export const Chat = () => {
+export const NewChat = () => {
 	return (
 		<div>
-			< ChatButton />
+			< NewChatButton />
 		</div>
 	);
 } 
