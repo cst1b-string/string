@@ -9,16 +9,14 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use protocol::{packet::v1::Packet, prost::DecodeError, try_decode_packet};
+use protocol::{prost::DecodeError, try_decode_packet, ProtocolPacket};
+use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
 
-use crate::{
-    error::{PacketError, SocketError},
-    peer::Peer,
-};
+use crate::peer::{Peer, PeerError};
 
 /// The magic number used to identify packets sent over the network.
 const MAGIC: u32 = 0x010203;
@@ -36,6 +34,52 @@ pub struct Socket {
     inner: Arc<UdpSocket>,
     /// A map of connections to other peers.
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+}
+
+/// An enumeration of possible errors that can occur when working with [Socket].
+#[derive(Error, Debug)]
+pub enum SocketError {
+    /// An unknown error occurred.
+    #[error("Unknown error")]
+    Unknown,
+    /// A connection to a peer timed ou.t
+    #[error("Connection timed out")]
+    ConnectionTimeout,
+    /// A connection to a peer already exists.
+    #[error("Already connected")]
+    ConnectionExists,
+    /// A connection to a peer is dead.
+    #[error("Not connected")]
+    ConnectionDead,
+    /// An IO operation failed.
+    #[error("Encountered an IO error")]
+    IoError(#[from] std::io::Error),
+    /// A packet failed to encode.
+    #[error("Failed to encode packet")]
+    EncodeFail(#[from] protocol::prost::EncodeError),
+    /// A peer operation failed.
+    #[error("Failed to process peer operation")]
+    PeerError(#[from] PeerError),
+}
+
+/// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
+#[derive(Error, Debug)]
+pub enum SocketPacketDecodeError {
+    /// An unknown error occurred.
+    #[error("Unknown error")]
+    Unknown,
+    /// The magic number in the packet was incorrect.
+    #[error("Magic number incorrect")]
+    BadMagic,
+    /// An unknown packet type was encountered.
+    #[error("Unknown packet type")]
+    BadPacketType,
+    /// The packet was too small to be valid.
+    #[error("Packet too small")]
+    BadSize,
+    /// An IO operation failed.
+    #[error("Encountered an IO error")]
+    IoError(#[from] std::io::Error),
 }
 
 impl Socket {
@@ -65,7 +109,7 @@ impl Socket {
     pub async fn add_peer(
         &mut self,
         addr: SocketAddr,
-    ) -> (mpsc::Sender<Packet>, mpsc::Receiver<Packet>) {
+    ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
         let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr, true);
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
@@ -85,12 +129,12 @@ impl Socket {
     /// Send a packet to the given peer.
     pub async fn send_packet(
         &mut self,
-        packet: Packet,
-        peer_addr: SocketAddr,
+        destination: SocketAddr,
+        packet: ProtocolPacket,
     ) -> Result<(), SocketError> {
         // lookup the peer
         let mut peers = self.peers.write().await;
-        let peer = peers.get_mut(&peer_addr).ok_or(SocketError::Unknown)?;
+        let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
         peer.send_packet(packet).await?;
 
         Ok(())
@@ -277,7 +321,7 @@ impl SocketPacket {
     }
 
     /// Decode a packet from the given byte buffer.
-    pub fn decode<Data>(bytes: Data) -> Result<SocketPacket, PacketError>
+    pub fn decode<Data>(bytes: Data) -> Result<SocketPacket, SocketPacketDecodeError>
     where
         Data: AsRef<[u8]>,
     {
@@ -285,7 +329,7 @@ impl SocketPacket {
 
         // check minimum packet length
         if bytes.len() < MIN_PACKET_SIZE {
-            return Err(PacketError::BadSize);
+            return Err(SocketPacketDecodeError::BadSize);
         }
 
         // create reader
@@ -294,7 +338,7 @@ impl SocketPacket {
         // check magic number
         let magic = reader.read_u24::<BigEndian>()?;
         if magic != MAGIC {
-            return Err(PacketError::BadMagic);
+            return Err(SocketPacketDecodeError::BadMagic);
         }
 
         // read packet header
@@ -324,7 +368,7 @@ impl SocketPacket {
     }
 }
 
-impl TryFrom<SocketPacket> for Packet {
+impl TryFrom<SocketPacket> for ProtocolPacket {
     type Error = DecodeError;
 
     fn try_from(value: SocketPacket) -> Result<Self, Self::Error> {

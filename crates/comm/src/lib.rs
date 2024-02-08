@@ -2,8 +2,8 @@
 //!
 //! This crate contains the communication code for string
 
-mod error;
-mod peer;
-mod socket;
+pub mod peer;
+pub mod socket;
 
+pub use peer::Peer;
 pub use socket::Socket;

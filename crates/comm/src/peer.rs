@@ -2,13 +2,14 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{packet::v1::Packet as ProtocolPacket, try_decode_packet};
-use tokio::sync::{mpsc, RwLock};
-
-use crate::{
-    error::PeerError,
-    socket::{SocketPacket, SocketPacketType},
+use protocol::{try_decode_packet, ProtocolPacket};
+use thiserror::Error;
+use tokio::sync::{
+    mpsc::{self, error::SendError},
+    RwLock,
 };
+
+use crate::socket::{SocketPacket, SocketPacketType};
 
 const CHANNEL_SIZE: usize = 32;
 
@@ -37,6 +38,17 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [NetworkPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
+}
+
+/// An enumeration of possible errors that can occur when working with peers.
+#[derive(Error, Debug)]
+pub enum PeerError {
+    // Failed to send packet between threads.
+    #[error("Failed to send packet to network thread")]
+    NetworkSendFail(#[from] SendError<SocketPacket>),
+    // Failed to send packet between threads.
+    #[error("Failed to send packet to application")]
+    ApplicationSendFail(#[from] SendError<ProtocolPacket>),
 }
 
 impl Peer {
