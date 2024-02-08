@@ -7,7 +7,7 @@ import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual'
 import { randomBytes, randomInt } from 'crypto';
 
 const sentences = new Array(1000).fill(true).map(
-	() => faker.lorem.sentence()
+	() => faker.lorem.sentence({min: 50, max: 100})
 )
 
 export default function Home() {
@@ -30,8 +30,10 @@ export default function Home() {
         ref={parentRef}
         className="List"
         style={{
-        	height: 400,
-			width:1000,
+			position: 'relative',
+			left: '7.5%',
+        	height: 800,
+			width: '85%',
           	overflowY: 'auto',
           	contain: 'strict',
         }}
