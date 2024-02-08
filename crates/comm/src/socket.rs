@@ -128,7 +128,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             };
 
             // decode network packet
-            let packet = match NetworkPacket::decode(&buf[..size]) {
+            let packet = match SocketPacket::decode(&buf[..size]) {
                 Ok(packet) => packet,
                 Err(e) => {
                     eprintln!("Error decoding packet: {:?}", e);
@@ -148,7 +148,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
 fn spawn_inbound_peer_task(
     socket: Arc<UdpSocket>,
     destination: SocketAddr,
-    mut net_outbound_rx: mpsc::Receiver<NetworkPacket>,
+    mut net_outbound_rx: mpsc::Receiver<SocketPacket>,
 ) {
     tokio::spawn(async move {
         loop {
@@ -184,9 +184,9 @@ fn spawn_inbound_peer_task(
 /// - 4 bytes: Length of the data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
-pub struct NetworkPacket {
+pub struct SocketPacket {
     /// The type of packet.
-    pub packet_type: NetworkPacketType,
+    pub packet_type: SocketPacketType,
     /// The sequence number of the packet.
     pub seq_number: u32,
     /// The length of the packet
@@ -195,21 +195,21 @@ pub struct NetworkPacket {
     pub data: Vec<u8>,
 }
 
-impl PartialEq for NetworkPacket {
+impl PartialEq for SocketPacket {
     fn eq(&self, other: &Self) -> bool {
         self.packet_type == other.packet_type && self.seq_number == other.seq_number
     }
 }
 
-impl Eq for NetworkPacket {}
+impl Eq for SocketPacket {}
 
-impl PartialOrd for NetworkPacket {
+impl PartialOrd for SocketPacket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.seq_number.cmp(&other.seq_number))
     }
 }
 
-impl Ord for NetworkPacket {
+impl Ord for SocketPacket {
     fn cmp(&self, other: &Self) -> Ordering {
         self.seq_number.cmp(&other.seq_number)
     }
@@ -218,7 +218,7 @@ impl Ord for NetworkPacket {
 /// An enumeration of the different types of network packets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum NetworkPacketType {
+pub enum SocketPacketType {
     /// Packets sent by the initiating peer.
     Syn,
     /// Packets sent by a receiving peer.
@@ -233,22 +233,22 @@ pub enum NetworkPacketType {
     Invalid,
 }
 
-impl From<u8> for NetworkPacketType {
+impl From<u8> for SocketPacketType {
     fn from(value: u8) -> Self {
         match value {
-            0 => NetworkPacketType::Syn,
-            1 => NetworkPacketType::Ack,
-            2 => NetworkPacketType::SynAck,
-            3 => NetworkPacketType::Heartbeat,
-            4 => NetworkPacketType::Data,
-            _ => NetworkPacketType::Invalid,
+            0 => SocketPacketType::Syn,
+            1 => SocketPacketType::Ack,
+            2 => SocketPacketType::SynAck,
+            3 => SocketPacketType::Heartbeat,
+            4 => SocketPacketType::Data,
+            _ => SocketPacketType::Invalid,
         }
     }
 }
 
-impl NetworkPacket {
+impl SocketPacket {
     /// Create a new packet with the given type, sequence number, and data.
-    pub fn new<Data>(packet_type: NetworkPacketType, seq_number: u32, data: Data) -> Self
+    pub fn new<Data>(packet_type: SocketPacketType, seq_number: u32, data: Data) -> Self
     where
         Data: AsRef<[u8]>,
     {
@@ -277,7 +277,7 @@ impl NetworkPacket {
     }
 
     /// Decode a packet from the given byte buffer.
-    pub fn decode<Data>(bytes: Data) -> Result<NetworkPacket, PacketError>
+    pub fn decode<Data>(bytes: Data) -> Result<SocketPacket, PacketError>
     where
         Data: AsRef<[u8]>,
     {
@@ -303,7 +303,7 @@ impl NetworkPacket {
         let data_length = reader.read_u32::<BigEndian>()?;
 
         if (data_length as usize) == 0 {
-            return Ok(NetworkPacket {
+            return Ok(SocketPacket {
                 packet_type,
                 seq_number,
                 data_length,
@@ -315,7 +315,7 @@ impl NetworkPacket {
         let mut data = vec![0; data_length as usize];
         reader.read_exact(&mut data)?;
 
-        Ok(NetworkPacket {
+        Ok(SocketPacket {
             packet_type,
             seq_number,
             data_length,
@@ -324,10 +324,10 @@ impl NetworkPacket {
     }
 }
 
-impl TryFrom<NetworkPacket> for Packet {
+impl TryFrom<SocketPacket> for Packet {
     type Error = DecodeError;
 
-    fn try_from(value: NetworkPacket) -> Result<Self, Self::Error> {
+    fn try_from(value: SocketPacket) -> Result<Self, Self::Error> {
         try_decode_packet(value.data)
     }
 }

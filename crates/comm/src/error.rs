@@ -4,7 +4,7 @@ use protocol::packet::v1::Packet;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
-use crate::socket::NetworkPacket;
+use crate::socket::SocketPacket;
 
 /// An enumeration of possible errors that can occur when working with the socket.
 #[derive(Error, Debug)]
@@ -57,7 +57,7 @@ pub enum PacketError {
 pub enum PeerError {
     // Failed to send packet between threads.
     #[error("Failed to send packet to network thread")]
-    NetworkSendFail(#[from] SendError<NetworkPacket>),
+    NetworkSendFail(#[from] SendError<SocketPacket>),
     // Failed to send packet between threads.
     #[error("Failed to send packet to application")]
     ApplicationSendFail(#[from] SendError<Packet>),

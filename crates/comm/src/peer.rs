@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::{
     error::PeerError,
-    socket::{NetworkPacket, NetworkPacketType},
+    socket::{SocketPacket, SocketPacketType},
 };
 
 const CHANNEL_SIZE: usize = 32;
@@ -36,7 +36,7 @@ pub struct Peer {
     /// The inbound [Packet] channel. This is used to receive packets from the application.
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [NetworkPacket] channel. This is used to receive packets from the network.
-    pub net_inbound_tx: mpsc::Sender<NetworkPacket>,
+    pub net_inbound_tx: mpsc::Sender<SocketPacket>,
 }
 
 impl Peer {
@@ -47,7 +47,7 @@ impl Peer {
     ) -> (
         Self,
         mpsc::Receiver<ProtocolPacket>,
-        mpsc::Receiver<NetworkPacket>,
+        mpsc::Receiver<SocketPacket>,
     ) {
         // channels for sending and receiving Packets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -97,7 +97,7 @@ impl Peer {
 fn start_sender_worker(
     state: Arc<RwLock<PeerState>>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
-    net_outbound_tx: mpsc::Sender<NetworkPacket>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
 ) {
     tokio::task::spawn(async move {
         loop {
@@ -118,8 +118,8 @@ fn start_sender_worker(
             let data_length: u32 = 0;
 
             // write to network
-            let net_packet = NetworkPacket {
-                packet_type: NetworkPacketType::Data,
+            let net_packet = SocketPacket {
+                packet_type: SocketPacketType::Data,
                 seq_number: 0,
                 data,
                 data_length: data_length as u32,
@@ -136,8 +136,8 @@ fn start_sender_worker(
 /// decoded contents to the application.
 fn start_receiver_worker(
     state: Arc<RwLock<PeerState>>,
-    mut net_inbound_rx: mpsc::Receiver<NetworkPacket>,
-    net_outbound_tx: mpsc::Sender<NetworkPacket>,
+    mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
     app_inbound_tx: mpsc::Sender<protocol::packet::v1::Packet>,
 ) {
     tokio::task::spawn(async move {
@@ -147,7 +147,7 @@ fn start_receiver_worker(
 
         loop {
             // receive packet from network
-            let packet: NetworkPacket = match net_inbound_rx.recv().await {
+            let packet: SocketPacket = match net_inbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
@@ -155,12 +155,12 @@ fn start_receiver_worker(
             match { *state.read().await } {
                 PeerState::Init => {
                     match packet.packet_type {
-                        NetworkPacketType::Syn | NetworkPacketType::SynAck => {
+                        SocketPacketType::Syn | SocketPacketType::SynAck => {
                             // initiator never receives SYN or SYNACK
                         }
-                        NetworkPacketType::Ack => {
-                            let synack = NetworkPacket {
-                                packet_type: NetworkPacketType::SynAck,
+                        SocketPacketType::Ack => {
+                            let synack = SocketPacket {
+                                packet_type: SocketPacketType::SynAck,
                                 seq_number: packet.seq_number + 1,
                                 data: vec![],
                                 data_length: 0,
@@ -173,19 +173,19 @@ fn start_receiver_worker(
                             // transition to established state
                             *state.write().await = PeerState::Established;
                         }
-                        NetworkPacketType::Heartbeat
-                        | NetworkPacketType::Data
-                        | NetworkPacketType::Invalid => {}
+                        SocketPacketType::Heartbeat
+                        | SocketPacketType::Data
+                        | SocketPacketType::Invalid => {}
                     }
                 }
                 PeerState::Connect => {
                     match packet.packet_type {
-                        NetworkPacketType::Ack => {
+                        SocketPacketType::Ack => {
                             // responder never receives ACK
                         }
-                        NetworkPacketType::Syn => {
-                            let ack = NetworkPacket {
-                                packet_type: NetworkPacketType::Ack,
+                        SocketPacketType::Syn => {
+                            let ack = SocketPacket {
+                                packet_type: SocketPacketType::Ack,
                                 seq_number: packet.seq_number + 1,
                                 data: vec![],
                                 data_length: 0,
@@ -196,22 +196,22 @@ fn start_receiver_worker(
                                 Err(_) => break,
                             }
                         }
-                        NetworkPacketType::SynAck => {
+                        SocketPacketType::SynAck => {
                             // transition to established state
                             *state.write().await = PeerState::Established;
                         }
-                        NetworkPacketType::Heartbeat
-                        | NetworkPacketType::Data
-                        | NetworkPacketType::Invalid => {}
+                        SocketPacketType::Heartbeat
+                        | SocketPacketType::Data
+                        | SocketPacketType::Invalid => {}
                     }
                 }
                 PeerState::Established => match packet.packet_type {
-                    NetworkPacketType::Syn
-                    | NetworkPacketType::Ack
-                    | NetworkPacketType::SynAck
-                    | NetworkPacketType::Heartbeat
-                    | NetworkPacketType::Invalid => {}
-                    NetworkPacketType::Data => {
+                    SocketPacketType::Syn
+                    | SocketPacketType::Ack
+                    | SocketPacketType::SynAck
+                    | SocketPacketType::Heartbeat
+                    | SocketPacketType::Invalid => {}
+                    SocketPacketType::Data => {
                         // add packet to queue
                         packet_queue.push(Reverse(packet));
 
