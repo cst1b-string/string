@@ -19,13 +19,13 @@ use tokio::{
 use crate::peer::{Peer, PeerError};
 
 /// The magic number used to identify packets sent over the network.
-const MAGIC: u32 = 0x010203;
+pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
 
-/// The minimum size of an encoded [NetworkPacket].
-const MIN_PACKET_SIZE: usize = 4 + 1 + 4 + 4;
+/// The minimum size of an encoded [SocketPacket].
+pub const MIN_SOCKET_PACKET_SIZE: usize = 4 + 1 + 4 + 4;
 
 /// The maximum size of a UDP datagram.
-const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
+pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
@@ -231,8 +231,10 @@ fn spawn_inbound_peer_task(
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,
-    /// The sequence number of the packet.
-    pub seq_number: u32,
+    /// The sequence of the underlying [ProtocolPacket].
+    pub packet_number: u32,
+    /// The chunk number of the packet. This is only used for data packets.
+    pub chunk_number: u32,
     /// The length of the packet
     pub data_length: u32,
     /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
@@ -241,7 +243,7 @@ pub struct SocketPacket {
 
 impl PartialEq for SocketPacket {
     fn eq(&self, other: &Self) -> bool {
-        self.packet_type == other.packet_type && self.seq_number == other.seq_number
+        self.packet_type == other.packet_type && self.packet_number == other.packet_number
     }
 }
 
@@ -249,13 +251,13 @@ impl Eq for SocketPacket {}
 
 impl PartialOrd for SocketPacket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.seq_number.cmp(&other.seq_number))
+        Some(self.packet_number.cmp(&other.packet_number))
     }
 }
 
 impl Ord for SocketPacket {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.seq_number.cmp(&other.seq_number)
+        self.packet_number.cmp(&other.packet_number)
     }
 }
 
@@ -292,13 +294,19 @@ impl From<u8> for SocketPacketType {
 
 impl SocketPacket {
     /// Create a new packet with the given type, sequence number, and data.
-    pub fn new<Data>(packet_type: SocketPacketType, seq_number: u32, data: Data) -> Self
+    pub fn new<Data>(
+        packet_type: SocketPacketType,
+        packet_number: u32,
+        chunk_number: u32,
+        data: Data,
+    ) -> Self
     where
         Data: AsRef<[u8]>,
     {
         Self {
             packet_type,
-            seq_number,
+            packet_number,
+            chunk_number,
             data_length: data.as_ref().len() as u32,
             data: Vec::from(data.as_ref()),
         }
@@ -306,12 +314,12 @@ impl SocketPacket {
 
     /// Encode the packet into a byte buffer.
     pub fn encode(&self) -> io::Result<Vec<u8>> {
-        let mut buf = Vec::with_capacity(MIN_PACKET_SIZE);
+        let mut buf = Vec::with_capacity(MIN_SOCKET_PACKET_SIZE);
 
         // write header
-        buf.write_u24::<BigEndian>(MAGIC)?;
+        buf.write_u24::<BigEndian>(SOCKET_PACKET_MAGIC_NUMBER)?;
         buf.write_u8(self.packet_type as u8)?;
-        buf.write_u32::<BigEndian>(self.seq_number)?;
+        buf.write_u32::<BigEndian>(self.packet_number)?;
         buf.write_u32::<BigEndian>(self.data_length)?;
 
         // write data
@@ -328,7 +336,7 @@ impl SocketPacket {
         let bytes = bytes.as_ref();
 
         // check minimum packet length
-        if bytes.len() < MIN_PACKET_SIZE {
+        if bytes.len() < MIN_SOCKET_PACKET_SIZE {
             return Err(SocketPacketDecodeError::BadSize);
         }
 
@@ -337,34 +345,35 @@ impl SocketPacket {
 
         // check magic number
         let magic = reader.read_u24::<BigEndian>()?;
-        if magic != MAGIC {
+        if magic != SOCKET_PACKET_MAGIC_NUMBER {
             return Err(SocketPacketDecodeError::BadMagic);
         }
 
         // read packet header
         let packet_type = reader.read_u8()?.into();
-        let seq_number = reader.read_u32::<BigEndian>()?;
+        let packet_number = reader.read_u32::<BigEndian>()?;
+        let chunk_number = reader.read_u32::<BigEndian>()?;
         let data_length = reader.read_u32::<BigEndian>()?;
 
         if (data_length as usize) == 0 {
-            return Ok(SocketPacket {
+            return Ok(SocketPacket::new(
                 packet_type,
-                seq_number,
-                data_length,
-                data: vec![],
-            });
+                packet_number,
+                chunk_number,
+                vec![],
+            ));
         }
 
         // read data
         let mut data = vec![0; data_length as usize];
         reader.read_exact(&mut data)?;
 
-        Ok(SocketPacket {
+        Ok(SocketPacket::new(
             packet_type,
-            seq_number,
-            data_length,
+            packet_number,
+            chunk_number,
             data,
-        })
+        ))
     }
 }
 

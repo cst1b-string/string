@@ -2,16 +2,23 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{try_decode_packet, ProtocolPacket};
+use protocol::{try_decode_packet, try_encode_packet, ProtocolPacket};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
     RwLock,
 };
 
-use crate::socket::{SocketPacket, SocketPacketType};
+use crate::socket::{
+    SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
+};
 
+/// The buffer size of the various channels used for passing data between the network tasks.
 const CHANNEL_SIZE: usize = 32;
+
+/// The maximum size of an [ProtocolPacket] chunk before it needs to be split into multiple
+/// [SocketPacket]s.
+const MAX_PROTOCOL_PACKET_CHUNK_SIZE: usize = UDP_MAX_DATAGRAM_SIZE - MIN_SOCKET_PACKET_SIZE;
 
 /// The state of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,15 +35,15 @@ pub enum PeerState {
 /// Makes use of four [tokio::sync::mpsc] channels:
 /// - `app_outbound_tx` is used to send [ProtocolPacket]s from the application to the peer SM.
 /// - `app_inbound_rx` is used to receive [ProtocolPacket]s from the peer SM to the application.
-/// - `net_outbound_tx` is used to send [NetworkPacket]s from the peer SM to the network.
-/// - `net_inbound_rx` is used to receive [NetworkPacket]s from the network to the peer SM.
+/// - `net_outbound_tx` is used to send [SocketPacket]s from the peer SM to the network.
+/// - `net_inbound_rx` is used to receive [SocketPacket]s from the network to the peer SM.
 #[derive(Debug)]
 pub struct Peer {
     /// The destination address.
     pub destination: SocketAddr,
-    /// The inbound [Packet] channel. This is used to receive packets from the application.
+    /// The inbound [ProtocolPacket] channel. This is used to receive packets from the application.
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
-    /// The inbound [NetworkPacket] channel. This is used to receive packets from the network.
+    /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
 }
 
@@ -61,11 +68,11 @@ impl Peer {
         mpsc::Receiver<ProtocolPacket>,
         mpsc::Receiver<SocketPacket>,
     ) {
-        // channels for sending and receiving Packets to/from the application
+        // channels for sending and receiving ProtocolPackets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
-        // channel for sending and receiving NetworkPackets to/from the network
+        // channel for sending and receiving SocketPackets to/from the network
         let (net_inbound_tx, net_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (net_outbound_tx, net_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
@@ -123,22 +130,24 @@ fn start_sender_worker(
                 None => break,
             };
 
-            // split packet into network packets
-
-            // TODO
-            let data: Vec<u8> = vec![];
-            let data_length: u32 = 0;
-
-            // write to network
-            let net_packet = SocketPacket {
-                packet_type: SocketPacketType::Data,
-                seq_number: 0,
-                data,
-                data_length: data_length as u32,
+            // encode packet
+            let buf = match try_encode_packet(&packet) {
+                Ok(buf) => buf,
+                Err(e) => {
+                    eprintln!("Failed to encode packet: {:?}", e);
+                    continue;
+                }
             };
-            match net_outbound_tx.send(net_packet).await {
-                Ok(_) => {}
-                Err(_) => break,
+
+            // split packet into network packets and send
+            for net_packet in buf
+                .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
+                .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
+            {
+                match net_outbound_tx.send(net_packet).await {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
             }
         }
     });
@@ -171,12 +180,12 @@ fn start_receiver_worker(
                             // initiator never receives SYN or SYNACK
                         }
                         SocketPacketType::Ack => {
-                            let synack = SocketPacket {
-                                packet_type: SocketPacketType::SynAck,
-                                seq_number: packet.seq_number + 1,
-                                data: vec![],
-                                data_length: 0,
-                            };
+                            let synack = SocketPacket::new(
+                                SocketPacketType::SynAck,
+                                packet.packet_number + 1,
+                                0,
+                                vec![],
+                            );
                             // write to network
                             match net_outbound_tx.send(synack).await {
                                 Ok(_) => {}
@@ -196,12 +205,12 @@ fn start_receiver_worker(
                             // responder never receives ACK
                         }
                         SocketPacketType::Syn => {
-                            let ack = SocketPacket {
-                                packet_type: SocketPacketType::Ack,
-                                seq_number: packet.seq_number + 1,
-                                data: vec![],
-                                data_length: 0,
-                            };
+                            let ack = SocketPacket::new(
+                                SocketPacketType::Ack,
+                                packet.packet_number + 1,
+                                0,
+                                vec![],
+                            );
                             // write to network
                             match net_outbound_tx.send(ack).await {
                                 Ok(_) => {}
