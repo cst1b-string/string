@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package str.packet.v1;
+
+message ExamplePacket {
+	string example = 1;
+}
+
+message Packet {
+	oneof packet {
+		ExamplePacket example = 1;
+	}
+}

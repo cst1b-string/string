@@ -1,0 +1,12 @@
+[package]
+name = "comm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+byteorder = "1"
+
+protocol = { path = "../protocol" }

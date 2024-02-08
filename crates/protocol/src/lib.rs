@@ -2,6 +2,8 @@
 //!
 //! This crate contains the protocol definition for the string protocol.
 
+use prost::{DecodeError, EncodeError, Message};
+
 /// Utility macro to quickly define a module for a protocol.
 macro_rules! include_protocol {
     ($name:literal, $version:ident) => {
@@ -42,4 +44,28 @@ pub mod channels {
 /// Defines the network buffer types and data.
 pub mod network {
     include_protocol!("network", v1);
+}
+
+/// Defines the packet buffer types and data.
+pub mod packet {
+    include_protocol!("packet", v1);
+}
+
+pub mod prost {
+    pub use prost::*;
+}
+
+/// Attempt to decode a packet from the given buffer.
+pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, DecodeError>
+where
+    Data: AsRef<[u8]>,
+{
+    packet::v1::Packet::decode(buf.as_ref())
+}
+
+/// Attempt to encode a packet into a buffer.
+pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, EncodeError> {
+    let mut buf = Vec::new();
+    packet.encode(&mut buf)?;
+    Ok(buf)
 }
