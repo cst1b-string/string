@@ -63,7 +63,7 @@ impl Socket {
                     }
                 };
 
-                peer.app_inbound_tx.send(packet).await;
+                peer.app_outbound_tx.send(packet).await;
             }
         });
 

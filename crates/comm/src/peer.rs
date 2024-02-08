@@ -2,11 +2,8 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{packet::v1::Packet, try_decode_packet};
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, RwLock},
-};
+use protocol::{packet::v1::Packet as ProtocolPacket, try_decode_packet};
+use tokio::sync::{mpsc, RwLock};
 
 use crate::{
     error::PeerError,
@@ -25,13 +22,19 @@ pub enum PeerState {
 }
 
 /// Represents a connection to a remote peer. All communication between peers is done using a
-/// shared UDP socket.
+/// shared UDP socket. Implements a simple state machine (SM) to manage the connection.
+///
+/// Makes use of four [tokio::sync::mpsc] channels:
+/// - `app_outbound_tx` is used to send [ProtocolPacket]s from the application to the peer SM.
+/// - `app_inbound_rx` is used to receive [ProtocolPacket]s from the peer SM to the application.
+/// - `net_outbound_tx` is used to send [NetworkPacket]s from the peer SM to the network.
+/// - `net_inbound_rx` is used to receive [NetworkPacket]s from the network to the peer SM.
 #[derive(Debug)]
 pub struct Peer {
     /// The destination address.
     pub destination: SocketAddr,
     /// The inbound [Packet] channel. This is used to receive packets from the application.
-    pub app_inbound_tx: mpsc::Sender<Packet>,
+    pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [NetworkPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<NetworkPacket>,
 }
@@ -41,7 +44,11 @@ impl Peer {
     pub fn new(
         destination: SocketAddr,
         initiate: bool,
-    ) -> (Self, mpsc::Receiver<Packet>, mpsc::Receiver<NetworkPacket>) {
+    ) -> (
+        Self,
+        mpsc::Receiver<ProtocolPacket>,
+        mpsc::Receiver<NetworkPacket>,
+    ) {
         // channels for sending and receiving Packets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -67,7 +74,7 @@ impl Peer {
         (
             Self {
                 destination,
-                app_inbound_tx,
+                app_outbound_tx,
                 net_inbound_tx,
             },
             app_inbound_rx,
@@ -76,8 +83,8 @@ impl Peer {
     }
 
     /// Send a packet to the peer.
-    pub async fn send_packet(&mut self, packet: Packet) -> Result<(), PeerError> {
-        self.app_inbound_tx
+    pub async fn send_packet(&mut self, packet: ProtocolPacket) -> Result<(), PeerError> {
+        self.app_outbound_tx
             .send(packet)
             .await
             .map_err(PeerError::ApplicationSendFail)?;
@@ -89,7 +96,7 @@ impl Peer {
 /// packets from the application, encoding them as [NetworkPacket]s, before sending them to the network.
 fn start_sender_worker(
     state: Arc<RwLock<PeerState>>,
-    mut app_outbound_rx: mpsc::Receiver<Packet>,
+    mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
     net_outbound_tx: mpsc::Sender<NetworkPacket>,
 ) {
     tokio::task::spawn(async move {
@@ -99,7 +106,7 @@ fn start_sender_worker(
                 tokio::time::sleep(Duration::from_millis(500)).await
             }
             // receive packet from queue
-            let packet: Packet = match app_outbound_rx.recv().await {
+            let packet: ProtocolPacket = match app_outbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
