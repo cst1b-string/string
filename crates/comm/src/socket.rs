@@ -243,21 +243,34 @@ pub struct SocketPacket {
 
 impl PartialEq for SocketPacket {
     fn eq(&self, other: &Self) -> bool {
-        self.packet_type == other.packet_type && self.packet_number == other.packet_number
+        self.packet_type == other.packet_type
+            && self.packet_number == other.packet_number
+            && self.chunk_number == other.chunk_number
     }
 }
 
 impl Eq for SocketPacket {}
 
+// TODO: Justify that packet_number and chunk_number will be unique.
+
 impl PartialOrd for SocketPacket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.packet_number.cmp(&other.packet_number))
+        //  enforces lexicographic ordering, with packet number taking precedence
+        if self.packet_number == other.packet_number {
+            Some(self.chunk_number.cmp(&other.chunk_number))
+        } else {
+            Some(self.packet_number.cmp(&other.packet_number))
+        }
     }
 }
 
 impl Ord for SocketPacket {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.packet_number.cmp(&other.packet_number)
+        if self.packet_number == other.packet_number {
+            self.chunk_number.cmp(&other.chunk_number)
+        } else {
+            self.packet_number.cmp(&other.packet_number)
+        }
     }
 }
 
