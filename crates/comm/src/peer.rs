@@ -13,6 +13,16 @@ use crate::socket::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
 
+/// A convenient macro for breaking out of a loop if an error occurs.
+macro_rules! try_break {
+    ($e:expr) => {
+        match $e {
+            Ok(e) => e,
+            Err(_) => break,
+        }
+    };
+}
+
 /// The buffer size of the various channels used for passing data between the network tasks.
 const CHANNEL_SIZE: usize = 32;
 
@@ -121,8 +131,13 @@ fn start_sender_worker(
     tokio::task::spawn(async move {
         loop {
             // ensure we're in a state where we can send packets
-            if { *state.read().await } != PeerState::Established {
-                tokio::time::sleep(Duration::from_millis(500)).await
+            let current_state = { *state.read().await };
+            if current_state == PeerState::Dead {
+                break;
+            }
+            if current_state != PeerState::Established {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
             }
             // receive packet from queue
             let packet: ProtocolPacket = match app_outbound_rx.recv().await {
@@ -180,17 +195,17 @@ fn start_receiver_worker(
                             // initiator never receives SYN or SYNACK
                         }
                         SocketPacketType::Ack => {
-                            let synack = SocketPacket::new(
-                                SocketPacketType::SynAck,
-                                packet.packet_number + 1,
-                                0,
-                                vec![],
-                            );
                             // write to network
-                            match net_outbound_tx.send(synack).await {
-                                Ok(_) => {}
-                                Err(_) => break,
-                            };
+                            try_break!(
+                                net_outbound_tx
+                                    .send(SocketPacket::new(
+                                        SocketPacketType::SynAck,
+                                        packet.packet_number + 1,
+                                        0,
+                                        vec![],
+                                    ))
+                                    .await
+                            );
                             // transition to established state
                             *state.write().await = PeerState::Established;
                         }
@@ -212,10 +227,7 @@ fn start_receiver_worker(
                                 vec![],
                             );
                             // write to network
-                            match net_outbound_tx.send(ack).await {
-                                Ok(_) => {}
-                                Err(_) => break,
-                            }
+                            try_break!(net_outbound_tx.send(ack).await);
                         }
                         SocketPacketType::SynAck => {
                             // transition to established state
@@ -233,6 +245,18 @@ fn start_receiver_worker(
                     | SocketPacketType::Heartbeat
                     | SocketPacketType::Invalid => {}
                     SocketPacketType::Data => {
+                        // send ack
+                        try_break!(
+                            net_outbound_tx
+                                .send(SocketPacket::new(
+                                    SocketPacketType::Ack,
+                                    packet.packet_number,
+                                    0,
+                                    vec![],
+                                ))
+                                .await
+                        );
+
                         // add packet to queue
                         packet_queue.push(Reverse(packet));
 
@@ -254,10 +278,10 @@ fn start_receiver_worker(
                         };
 
                         // forward to application
-                        match app_inbound_tx.send(packet).await {
-                            Ok(_) => {}
-                            Err(_) => break,
-                        }
+                        try_break!(app_inbound_tx.send(packet).await);
+
+                        // clear queue
+                        packet_queue.clear();
                     }
                 },
                 PeerState::Dead => {}
