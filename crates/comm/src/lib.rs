@@ -8,6 +8,7 @@ use error::SocketError;
 use packet::NetworkPacket;
 use peer::Peer;
 
+use protocol::packet::v1::Packet;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
@@ -24,8 +25,6 @@ pub struct Socket {
     inner: Arc<UdpSocket>,
     /// A map of connections to other peers.
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    /// The send half of the packet transmission channel.
-    packet_tx: mpsc::Sender<(SocketAddr, NetworkPacket)>,
 }
 
 impl Socket {
@@ -64,7 +63,7 @@ impl Socket {
                     }
                 };
 
-                peer.inbound_packet_tx.send(packet).await;
+                peer.app_inbound_tx.send(packet).await;
             }
         });
 
@@ -111,13 +110,12 @@ impl Socket {
                 };
 
                 // forward to peer
-                peer.inbound_packet_tx.send(packet).await;
+                peer.net_inbound_tx.send(packet).await;
             }
         });
 
         Ok(Self {
             inner: socket,
-            packet_tx,
             peers,
         })
     }
@@ -125,14 +123,14 @@ impl Socket {
     /// Add a new peer to the list of connections.
     pub async fn add_peer(&mut self, addr: SocketAddr) {
         let mut connections = self.peers.write().await;
-        let (peer, _) = Peer::new(self.inner.clone(), addr, false);
+        let (peer, _, _) = Peer::new(addr, false);
         connections.insert(addr, peer);
     }
 
     /// Send a packet to the given peer.
     pub async fn send_packet(
         &mut self,
-        packet: NetworkPacket,
+        packet: Packet,
         peer_addr: SocketAddr,
     ) -> Result<(), SocketError> {
         // lookup the peer

@@ -1,6 +1,9 @@
 //! Defines the packet format used for communication between peers.
 
-use std::io::{self, Cursor, Read, Write};
+use std::{
+    cmp::Ordering,
+    io::{self, Cursor, Read, Write},
+};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use protocol::{packet::v1::Packet, prost::DecodeError, try_decode_packet};
@@ -33,8 +36,28 @@ pub struct NetworkPacket {
     pub data: Vec<u8>,
 }
 
+impl PartialEq for NetworkPacket {
+    fn eq(&self, other: &Self) -> bool {
+        self.packet_type == other.packet_type && self.seq_number == other.seq_number
+    }
+}
+
+impl Eq for NetworkPacket {}
+
+impl PartialOrd for NetworkPacket {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.seq_number.cmp(&other.seq_number))
+    }
+}
+
+impl Ord for NetworkPacket {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.seq_number.cmp(&other.seq_number)
+    }
+}
+
 /// An enumeration of the different types of network packets.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum NetworkPacketType {
     /// Packets sent by the initiating peer.

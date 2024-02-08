@@ -1,5 +1,6 @@
 //! Defines the various error types used in this crate.
 
+use protocol::packet::v1::Packet;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -55,6 +56,9 @@ pub enum PacketError {
 #[derive(Error, Debug)]
 pub enum PeerError {
     // Failed to send packet between threads.
-    #[error("Failed to send packet between threads")]
-    SendFail(#[from] SendError<NetworkPacket>),
+    #[error("Failed to send packet to network thread")]
+    NetworkSendFail(#[from] SendError<NetworkPacket>),
+    // Failed to send packet between threads.
+    #[error("Failed to send packet to application")]
+    ApplicationSendFail(#[from] SendError<Packet>),
 }
