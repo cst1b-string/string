@@ -4,7 +4,7 @@ use protocol::packet::v1::Packet;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
-use crate::packet::NetworkPacket;
+use crate::socket::NetworkPacket;
 
 /// An enumeration of possible errors that can occur when working with the socket.
 #[derive(Error, Debug)]

@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::{
     error::PeerError,
-    packet::{NetworkPacket, NetworkPacketType},
+    socket::{NetworkPacket, NetworkPacketType},
 };
 
 const CHANNEL_SIZE: usize = 32;

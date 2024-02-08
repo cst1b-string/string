@@ -5,8 +5,8 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use error::SocketError;
-use packet::NetworkPacket;
 use peer::Peer;
+use socket::NetworkPacket;
 
 use protocol::packet::v1::Packet;
 use tokio::{
@@ -15,8 +15,8 @@ use tokio::{
 };
 
 mod error;
-mod packet;
 mod peer;
+mod socket;
 
 /// The maximum size of a UDP datagram.
 const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
