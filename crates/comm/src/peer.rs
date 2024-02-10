@@ -2,7 +2,7 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{try_decode_packet, try_encode_packet, ProtocolPacket};
+use string_protocol::{try_decode_packet, try_encode_packet, ProtocolPacket};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -186,7 +186,7 @@ fn start_receiver_worker(
     state: Arc<RwLock<PeerState>>,
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
-    app_inbound_tx: mpsc::Sender<protocol::packet::v1::Packet>,
+    app_inbound_tx: mpsc::Sender<ProtocolPacket>,
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP

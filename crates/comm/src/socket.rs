@@ -9,7 +9,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use protocol::{prost::DecodeError, try_decode_packet, ProtocolPacket};
+use string_protocol::{prost::DecodeError, try_decode_packet, ProtocolPacket};
 use thiserror::Error;
 use tokio::{
     net::UdpSocket,
@@ -57,7 +57,7 @@ pub enum SocketError {
     IoError(#[from] std::io::Error),
     /// A packet failed to encode.
     #[error("Failed to encode packet")]
-    EncodeFail(#[from] protocol::prost::EncodeError),
+    EncodeFail(#[from] string_protocol::prost::EncodeError),
     /// A peer operation failed.
     #[error("Failed to process peer operation")]
     PeerError(#[from] PeerError),

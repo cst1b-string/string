@@ -1,5 +1,5 @@
 [package]
-name = "comm"
+name = "string-comm"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,4 @@ tokio = { workspace = true }
 byteorder = "1"
 tracing = "0.1"
 
-protocol = { path = "../protocol" }
+string-protocol = { path = "../protocol" }

@@ -1,8 +1,8 @@
-use log::info;
 use tauri::{
     plugin::{self, Plugin},
     AppHandle, Runtime,
 };
+use tracing::info;
 
 pub struct ProtocolPlugin {}
 
