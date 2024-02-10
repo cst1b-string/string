@@ -15,6 +15,7 @@ use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
+use tracing::{debug, span, trace};
 
 use crate::peer::{Peer, PeerError, PeerState};
 
@@ -97,7 +98,8 @@ impl Socket {
         let peers = Arc::new(RwLock::new(HashMap::new()));
 
         // start the outbound worker
-        start_outbound_worker(socket.clone(), peers.clone());
+        span!(tracing::Level::INFO, "socket::outbound")
+            .in_scope(|| start_outbound_worker(socket.clone(), peers.clone()));
 
         Ok(Self {
             inner: socket,
@@ -116,8 +118,14 @@ impl Socket {
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
         // spawn the inbound peer task
-        spawn_inbound_peer_task(self.inner.clone(), peer.destination, net_outbound_rx);
-
+        span!(
+            tracing::Level::INFO,
+            "socket::inbound",
+            ?peer.remote_addr,
+        )
+        .in_scope(|| {
+            spawn_inbound_peer_task(self.inner.clone(), peer.remote_addr, net_outbound_rx)
+        });
         // insert the peer into the connections map - done in a separate block to avoid holding the
         // lock for too long
         {
@@ -162,6 +170,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
     tokio::spawn(async move {
         let mut buf = [0; UDP_MAX_DATAGRAM_SIZE];
         loop {
+            trace!("start outbound worker loop");
             // wait for socket to be readable
             if let Err(e) = socket.readable().await {
                 eprintln!("Error reading from socket: {:?}", e);
@@ -197,6 +206,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             };
 
             // forward to peer
+            debug!(?peer.remote_addr, "forward packet to peer");
             if let Err(e) = peer.net_inbound_tx.send(packet).await {
                 eprintln!("Error forwarding packet to peer: {:?}", e);
             }
@@ -212,6 +222,7 @@ fn spawn_inbound_peer_task(
 ) {
     tokio::spawn(async move {
         loop {
+            trace!("start inbound peer task loop");
             // receive packet from peer
             let packet = match net_outbound_rx.recv().await {
                 Some(packet) => packet,
@@ -228,6 +239,7 @@ fn spawn_inbound_peer_task(
             };
 
             // send to network
+            debug!(?destination, len = bytes.len(), "send packet to network");
             if let Err(e) = socket.send_to(&bytes, destination).await {
                 eprintln!("Error sending packet to network: {:?}", e);
             }
@@ -291,7 +303,7 @@ impl Ord for SocketPacket {
 }
 
 /// An enumeration of the different types of network packets.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum SocketPacketType {
     /// Packets sent by the initiating peer.
