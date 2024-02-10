@@ -7,6 +7,7 @@ edition = "2021"
 tokio = { workspace=  true }
 
 comm = { path = "../../crates/comm" }
+protocol = { path = "../../crates/protocol" }
 
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"

@@ -3,6 +3,7 @@ use comm::{peer::PeerState, Socket};
 use std::{net::SocketAddr, time::Duration};
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
+use protocol::{ProtocolPacket, messages, packet};
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -43,10 +44,10 @@ async fn main() {
     };
 
     // add peer
-    let (_app_outbound_tx, _app_inbound_rx) = socket.add_peer(peer_addr, initiate).await;
+    let (app_outbound_tx, mut app_inbound_rx) = socket.add_peer(peer_addr, initiate).await;
 
-    info!("Setup success");
-    info!("Attempting transmission...");
+    info!("[+] Setup success");
+    info!("[*] Attempting transmission...");
 
     let mut i: u16 = 0;
     let mut ready: bool = false;
@@ -72,4 +73,45 @@ async fn main() {
     }
 
     info!("[+] Connection with {0} succeeded!", peer_addr);
+    // The messages are opposite below because it is intended for the opposite end
+    let text_data = if initiate { "You are receiving!" } else { "You are initating!" };
+
+    let mut pkt = ProtocolPacket::default();
+    let message = messages::v1::Message {
+        id: "test-id".to_string(),
+        channel_id: "test-channel".to_string(),
+        username: "test-username".to_string(),
+        content: text_data.to_string(),
+        attachments: vec![]
+    };
+    pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
+    let _ = app_outbound_tx.send(pkt).await;
+    let mut poll_cnt: u16 = 0;
+    let mut received: bool = false;
+    let mut remote_pkt: Option<ProtocolPacket> = None;
+    while poll_cnt < 10 && !received {
+        match app_inbound_rx.try_recv() {
+            Ok(recv) => {
+                received = true;
+                remote_pkt = Some(recv);
+            },
+            Err(_) => {}
+        }
+        poll_cnt += 1;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if !received {
+        error!("[-] Failed to receive message timely");
+    }
+    match remote_pkt {
+        Some(recv) => {
+            match recv.packet {
+                Some(packet::v1::packet::Packet::PktMessage(m)) => {
+                    info!("[+] Received remote message: {0}", m.content);
+                },
+                None => {}
+            }
+        },
+        None => {}
+    }
 }
