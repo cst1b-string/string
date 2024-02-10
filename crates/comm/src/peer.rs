@@ -55,6 +55,7 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
+    pub state: Arc<RwLock<PeerState>>
 }
 
 /// An enumeration of possible errors that can occur when working with peers.
@@ -83,8 +84,8 @@ impl Peer {
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
         // channel for sending and receiving SocketPackets to/from the network
-        let (net_inbound_tx, net_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
-        let (net_outbound_tx, net_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (net_inbound_tx, net_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (net_outbound_tx, net_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
         // shared state
         let state = Arc::new(RwLock::new(match initiate {
@@ -105,6 +106,7 @@ impl Peer {
                 destination,
                 app_outbound_tx,
                 net_inbound_tx,
+                state
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -129,11 +131,26 @@ fn start_sender_worker(
     net_outbound_tx: mpsc::Sender<SocketPacket>,
 ) {
     tokio::task::spawn(async move {
+        let mut syns_sent: u32 = 0;
         loop {
             // ensure we're in a state where we can send packets
             let current_state = { *state.read().await };
             if current_state == PeerState::Dead {
                 break;
+            }
+            // We're initiating, let's send a Syn to kickstart the process
+            if current_state == PeerState::Init {
+                try_break!(
+                net_outbound_tx
+                    .send(SocketPacket::new(
+                        SocketPacketType::Syn,
+                        syns_sent,
+                        0,
+                        vec![],
+                    ))
+                    .await
+                );
+                syns_sent += 1;
             }
             if current_state != PeerState::Established {
                 tokio::time::sleep(Duration::from_millis(500)).await;

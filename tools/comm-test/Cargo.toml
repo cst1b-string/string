@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 comm = { path = "../../crates/comm" }
+tokio = { version = "1.36.0", features = ["full"] }
