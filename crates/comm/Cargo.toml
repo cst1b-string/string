@@ -8,5 +8,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 byteorder = "1"
+tracing = "0.1"
 
 protocol = { path = "../protocol" }

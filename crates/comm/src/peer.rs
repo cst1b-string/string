@@ -8,6 +8,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     RwLock,
 };
+use tracing::{debug, span, trace, warn, Level};
 
 use crate::socket::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
@@ -50,7 +51,7 @@ pub enum PeerState {
 #[derive(Debug)]
 pub struct Peer {
     /// The destination address.
-    pub destination: SocketAddr,
+    pub remote_addr: SocketAddr,
     /// The inbound [ProtocolPacket] channel. This is used to receive packets from the application.
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
@@ -70,8 +71,9 @@ pub enum PeerError {
 
 impl Peer {
     /// Create a new connection to the given destination.
+    #[tracing::instrument(name = "peer", skip(initiate))]
     pub fn new(
-        destination: SocketAddr,
+        remote_addr: SocketAddr,
         initiate: bool,
     ) -> (
         Self,
@@ -92,17 +94,22 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
-        start_receiver_worker(
-            state.clone(),
-            net_inbound_rx,
-            net_outbound_tx.clone(),
-            app_inbound_tx.clone(),
-        );
-        start_sender_worker(state.clone(), app_outbound_rx, net_outbound_tx.clone());
+        span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
+            start_receiver_worker(
+                state.clone(),
+                net_inbound_rx,
+                net_outbound_tx.clone(),
+                app_inbound_tx.clone(),
+            )
+        });
+
+        span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
+            start_sender_worker(state.clone(), app_outbound_rx, net_outbound_tx.clone())
+        });
 
         (
             Self {
-                destination,
+                remote_addr,
                 app_outbound_tx,
                 net_inbound_tx,
             },
@@ -130,22 +137,27 @@ fn start_sender_worker(
 ) {
     tokio::task::spawn(async move {
         loop {
+            trace!("start_sender_worker loop");
             // ensure we're in a state where we can send packets
             let current_state = { *state.read().await };
             if current_state == PeerState::Dead {
+                warn!("peer is dead, breaking out of sender worker loop");
                 break;
             }
             if current_state != PeerState::Established {
+                debug!("peer is not established, sleeping for 500ms");
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 continue;
             }
             // receive packet from queue
+            trace!("receive packet from queue");
             let packet: ProtocolPacket = match app_outbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
 
             // encode packet
+            trace!("encode packet: {:?}", packet);
             let buf = match try_encode_packet(&packet) {
                 Ok(buf) => buf,
                 Err(e) => {
@@ -182,13 +194,27 @@ fn start_receiver_worker(
         let mut packet_queue = std::collections::BinaryHeap::new();
 
         loop {
+            trace!("start_receiver_worker loop");
+
             // receive packet from network
             let packet: SocketPacket = match net_inbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
 
-            match { *state.read().await } {
+            // read current state
+            let current_state = {
+                let state = *state.read().await;
+                trace!(state = ?state, "acquire state read lock");
+                state
+            };
+            debug!(
+                ?current_state,
+                kind = ?packet.packet_type,
+                "received packet"
+            );
+
+            match current_state {
                 PeerState::Init => {
                     match packet.packet_type {
                         SocketPacketType::Syn | SocketPacketType::SynAck => {
@@ -207,6 +233,11 @@ fn start_receiver_worker(
                                     .await
                             );
                             // transition to established state
+                            debug!(
+                                ?current_state,
+                                next = ?PeerState::Established,
+                                "state transition"
+                            );
                             *state.write().await = PeerState::Established;
                         }
                         SocketPacketType::Heartbeat
@@ -231,6 +262,11 @@ fn start_receiver_worker(
                         }
                         SocketPacketType::SynAck => {
                             // transition to established state
+                            debug!(
+                                ?current_state,
+                                next = ?PeerState::Established,
+                                "state transition"
+                            );
                             *state.write().await = PeerState::Established;
                         }
                         SocketPacketType::Heartbeat
@@ -278,9 +314,11 @@ fn start_receiver_worker(
                         };
 
                         // forward to application
+                        debug!(?packet, "forward packet to application");
                         try_break!(app_inbound_tx.send(packet).await);
 
                         // clear queue
+                        debug!("clear packet queue");
                         packet_queue.clear();
                     }
                 },
