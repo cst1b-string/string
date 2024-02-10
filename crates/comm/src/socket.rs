@@ -16,13 +16,14 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
-use crate::peer::{Peer, PeerError};
+use crate::peer::{Peer, PeerError, PeerState};
 
 /// The magic number used to identify packets sent over the network.
 pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
 
 /// The minimum size of an encoded [SocketPacket].
-pub const MIN_SOCKET_PACKET_SIZE: usize = 4 + 1 + 4 + 4;
+// 3 (Magic) + 1 (Packet type) + 4 (Packet number) + 4 (Chunk number) + 4 (Data length)
+pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
 
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
@@ -109,8 +110,9 @@ impl Socket {
     pub async fn add_peer(
         &mut self,
         addr: SocketAddr,
+        initiate: bool
     ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
-        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr, true);
+        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr, initiate);
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
         // spawn the inbound peer task
@@ -124,6 +126,20 @@ impl Socket {
         }
 
         (app_outbound_tx, app_inbound_rx)
+    }
+
+    pub async fn get_peer_state(
+        &mut self,
+        addr: SocketAddr,
+    ) -> Option<PeerState> {
+        let connections = self.peers.read().await;
+        if !connections.contains_key(&addr) {
+            return None;
+        }
+        else {
+            let state = { *connections[&addr].state.read().await };
+            Some(state)
+        }
     }
 
     /// Send a packet to the given peer.
@@ -333,6 +349,7 @@ impl SocketPacket {
         buf.write_u24::<BigEndian>(SOCKET_PACKET_MAGIC_NUMBER)?;
         buf.write_u8(self.packet_type as u8)?;
         buf.write_u32::<BigEndian>(self.packet_number)?;
+        buf.write_u32::<BigEndian>(self.chunk_number)?;
         buf.write_u32::<BigEndian>(self.data_length)?;
 
         // write data
