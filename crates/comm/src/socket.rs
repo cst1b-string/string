@@ -15,7 +15,7 @@ use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
-use tracing::{debug, field::debug, span, trace};
+use tracing::{debug, span, trace};
 
 use crate::peer::{Peer, PeerError};
 
