@@ -3,6 +3,7 @@ syntax = "proto3";
 package str.packet.v1;
 
 import "str/messages/v1/messages.proto";
+import "str/crypto/v1/crypto.proto";
 
 message ExamplePacket {
 	string example = 1;
@@ -12,5 +13,6 @@ message Packet {
 	oneof packet {
 //		ExamplePacket example = 1;
 		str.messages.v1.Message pkt_message = 1;
+		str.crypto.v1.Crypto pkt_crypto = 2;
 	}
 }

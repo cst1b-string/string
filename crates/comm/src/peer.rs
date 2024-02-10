@@ -13,6 +13,7 @@ use tracing::{debug, span, trace, warn, Level};
 use crate::socket::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
+use crate::crypto::Crypto;
 
 /// A convenient macro for breaking out of a loop if an error occurs.
 macro_rules! try_break {
@@ -36,6 +37,8 @@ const MAX_PROTOCOL_PACKET_CHUNK_SIZE: usize = UDP_MAX_DATAGRAM_SIZE - MIN_SOCKET
 pub enum PeerState {
     Init,
     Connect,
+    KeyInit,
+    KeyRecv,
     Established,
     Dead,
 }
@@ -56,7 +59,9 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
-    pub state: Arc<RwLock<PeerState>>
+    pub state: Arc<RwLock<PeerState>>,
+    // This object will handle the key exchange and encryption needs
+    pub crypto: Arc<RwLock<Crypto>>,
 }
 
 /// An enumeration of possible errors that can occur when working with peers.
@@ -95,17 +100,20 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
+        let crypto = Arc::new(RwLock::new(Crypto::new()));
+
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
             start_receiver_worker(
                 state.clone(),
                 net_inbound_rx,
                 net_outbound_tx.clone(),
                 app_inbound_tx.clone(),
+                crypto.clone()
             )
         });
 
         span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
-            start_sender_worker(state.clone(), app_outbound_rx, net_outbound_tx.clone())
+            start_sender_worker(state.clone(), app_outbound_rx, net_outbound_tx.clone(), crypto.clone())
         });
 
         (
@@ -113,7 +121,8 @@ impl Peer {
                 remote_addr,
                 app_outbound_tx,
                 net_inbound_tx,
-                state
+                state,
+                crypto
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -136,6 +145,7 @@ fn start_sender_worker(
     state: Arc<RwLock<PeerState>>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
+    crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
@@ -204,6 +214,7 @@ fn start_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
     app_inbound_tx: mpsc::Sender<protocol::packet::v1::Packet>,
+    crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
@@ -249,13 +260,35 @@ fn start_receiver_worker(
                                     ))
                                     .await
                             );
-                            // transition to established state
+                            // transition to key init state
                             debug!(
                                 ?current_state,
-                                next = ?PeerState::Established,
+                                next = ?PeerState::KeyInit,
                                 "state transition"
                             );
-                            *state.write().await = PeerState::Established;
+                            *state.write().await = PeerState::KeyInit;
+
+                            // A bit hackish
+                            {
+                                let key_init_packet = crypto.read().await.kex_packet();
+                                let buf = match try_encode_packet(&key_init_packet) {
+                                    Ok(buf) => buf,
+                                    Err(e) => {
+                                        eprintln!("Failed to encode packet: {:?}", e);
+                                        continue;
+                                    }
+                                };
+                                try_break!(
+                                    net_outbound_tx
+                                    .send(SocketPacket::new(
+                                        SocketPacketType::Data,
+                                        0,
+                                        0,
+                                        buf,
+                                    ))
+                                    .await
+                                );
+                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
@@ -281,17 +314,19 @@ fn start_receiver_worker(
                             // transition to established state
                             debug!(
                                 ?current_state,
-                                next = ?PeerState::Established,
+                                next = ?PeerState::KeyRecv,
                                 "state transition"
                             );
-                            *state.write().await = PeerState::Established;
+                            *state.write().await = PeerState::KeyRecv;
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
                         | SocketPacketType::Invalid => {}
                     }
                 }
-                PeerState::Established => match packet.packet_type {
+                PeerState::Established
+                | PeerState::KeyRecv
+                | PeerState::KeyInit => match packet.packet_type {
                     SocketPacketType::Syn
                     | SocketPacketType::Ack
                     | SocketPacketType::SynAck
@@ -330,13 +365,54 @@ fn start_receiver_worker(
                             Err(_) => continue,
                         };
 
-                        // forward to application
-                        debug!(?packet, "forward packet to application");
-                        try_break!(app_inbound_tx.send(packet).await);
+                        if current_state == PeerState::KeyInit ||
+                            current_state == PeerState::KeyRecv {
+                            let result = crypto.write().await.handle_crypto(packet, current_state);
+                            match result {
+                                Ok(_) => {
+                                    if current_state == PeerState::KeyRecv {
+                                        {
+                                            let key_recv_packet = crypto.read().await.kex_packet();
+                                            let buf = match try_encode_packet(&key_recv_packet) {
+                                                Ok(buf) => buf,
+                                                Err(e) => {
+                                                    eprintln!("Failed to encode packet: {:?}", e);
+                                                    continue;
+                                                }
+                                            };
+                                            match net_outbound_tx
+                                                .send(SocketPacket::new(
+                                                    SocketPacketType::Data,
+                                                    0,
+                                                    0,
+                                                    buf,
+                                                ))
+                                                .await
+                                            {
+                                                Ok(_) => {}
+                                                Err(_) => {}
+                                            }
+                                        }
+                                    }
+                                    debug!(
+                                        ?current_state,
+                                        next = ?PeerState::Established,
+                                        "state transition"
+                                    );
+                                    *state.write().await = PeerState::Established;
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        else {
+                            // forward to application
+                            debug!(?packet, "forward packet to application");
+                            try_break!(app_inbound_tx.send(packet).await);
 
-                        // clear queue
-                        debug!("clear packet queue");
-                        packet_queue.clear();
+                            // clear queue
+                            debug!("clear packet queue");
+                            packet_queue.clear();
+                        }
                     }
                 },
                 PeerState::Dead => {}

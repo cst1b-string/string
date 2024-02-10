@@ -11,3 +11,7 @@ byteorder = "1"
 tracing = "0.1"
 
 protocol = { path = "../protocol" }
+
+x25519-dalek = "^2.0.0"
+double-ratchet-rs = "0.4.6"
+rand = "0.8.5"

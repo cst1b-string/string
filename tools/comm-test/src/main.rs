@@ -109,6 +109,7 @@ async fn main() {
                 Some(packet::v1::packet::Packet::PktMessage(m)) => {
                     info!("[+] Received remote message: {0}", m.content);
                 },
+                Some(packet::v1::packet::Packet::PktCrypto(_)) => {}
                 None => {}
             }
         },

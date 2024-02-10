@@ -4,6 +4,7 @@
 
 pub mod peer;
 pub mod socket;
+pub mod crypto;
 
 pub use peer::Peer;
 pub use socket::Socket;
