@@ -91,6 +91,9 @@ impl Peer {
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
+        let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (peer_outbound_tx, peer_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
+
         // channel for sending and receiving SocketPackets to/from the network
         let (net_inbound_tx, net_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (net_outbound_tx, net_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -104,18 +107,44 @@ impl Peer {
         let crypto = Arc::new(RwLock::new(Crypto::new()));
 
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
-            start_receiver_worker(
+            start_peer_receiver_worker(
                 state.clone(),
-                net_inbound_rx,
-                net_outbound_tx.clone(),
+                peer_outbound_tx.clone(),
                 app_inbound_tx.clone(),
+                peer_inbound_rx,
                 crypto.clone()
             )
         });
 
         span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
-            start_sender_worker(state.clone(), app_outbound_rx, net_outbound_tx.clone(), crypto.clone())
+            start_peer_sender_worker(
+                state.clone(),
+                peer_outbound_tx.clone(),
+                app_inbound_tx.clone(),
+                app_outbound_rx,
+                crypto.clone())
         });
+
+        span!(Level::TRACE, "crypto::receiver", %remote_addr).in_scope(|| {
+            start_crypto_receiver_worker(
+                state.clone(),
+                net_outbound_tx.clone(),
+                peer_inbound_tx.clone(),
+                net_inbound_rx,
+                crypto.clone()
+            )
+        });
+
+        span!(Level::TRACE, "crypto::sender", %remote_addr).in_scope(|| {
+            start_crypto_sender_worker(
+                state.clone(),
+                net_outbound_tx.clone(),
+                peer_inbound_tx.clone(),
+                peer_outbound_rx,
+                crypto.clone()
+            )
+        });
+
 
         (
             Self {
@@ -142,16 +171,17 @@ impl Peer {
 
 /// Starts the background task that handles sending packets to the network, taking
 /// packets from the application, encoding them as [NetworkPacket]s, before sending them to the network.
-fn start_sender_worker(
+fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
+    peer_outbound_tx: mpsc::Sender<SocketPacket>,
+    app_inbound_tx: mpsc::Sender<ProtocolPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
-    net_outbound_tx: mpsc::Sender<SocketPacket>,
     crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
         loop {
-            trace!("start_sender_worker loop");
+            trace!("start_peer_sender_worker loop");
             // ensure we're in a state where we can send packets
             let current_state = { *state.read().await };
             if current_state == PeerState::Dead {
@@ -161,7 +191,7 @@ fn start_sender_worker(
             // We're initiating, let's send a Syn to kickstart the process
             if current_state == PeerState::Init {
                 try_break!(
-                net_outbound_tx
+                peer_outbound_tx
                     .send(SocketPacket::new(
                         SocketPacketType::Syn,
                         syns_sent,
@@ -205,7 +235,7 @@ fn start_sender_worker(
                     Err(_) => { continue; }
                 };
                 let net_packet = SocketPacket::new(SocketPacketType::Data, 0, 0, true, actual_chunk);
-                match net_outbound_tx.send(net_packet).await {
+                match peer_outbound_tx.send(net_packet).await {
                     Ok(_) => {}
                     Err(_) => break,
                 }
@@ -216,11 +246,11 @@ fn start_sender_worker(
 
 /// Starts the background tasks that handle receiving packets from the network and forwarding their
 /// decoded contents to the application.
-fn start_receiver_worker(
+fn start_peer_receiver_worker(
     state: Arc<RwLock<PeerState>>,
-    mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
-    net_outbound_tx: mpsc::Sender<SocketPacket>,
-    app_inbound_tx: mpsc::Sender<protocol::packet::v1::Packet>,
+    peer_outbound_tx: mpsc::Sender<SocketPacket>,
+    app_inbound_tx: mpsc::Sender<ProtocolPacket>,
+    mut peer_inbound_rx: mpsc::Receiver<SocketPacket>,
     crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
@@ -229,10 +259,10 @@ fn start_receiver_worker(
         let mut packet_queue = std::collections::BinaryHeap::new();
 
         loop {
-            trace!("start_receiver_worker loop");
+            trace!("start_peer_receiver_worker loop");
 
-            // receive packet from network
-            let mut packet: SocketPacket = match net_inbound_rx.recv().await {
+            // receive packet from crypto
+            let mut packet: SocketPacket = match peer_inbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
@@ -258,7 +288,7 @@ fn start_receiver_worker(
                         SocketPacketType::Ack => {
                             // write to network
                             try_break!(
-                                net_outbound_tx
+                                peer_outbound_tx
                                     .send(SocketPacket::new(
                                         SocketPacketType::SynAck,
                                         packet.packet_number + 1,
@@ -287,7 +317,7 @@ fn start_receiver_worker(
                                     }
                                 };
                                 try_break!(
-                                    net_outbound_tx
+                                    peer_outbound_tx
                                     .send(SocketPacket::new(
                                         SocketPacketType::Data,
                                         0,
@@ -318,7 +348,7 @@ fn start_receiver_worker(
                                 vec![],
                             );
                             // write to network
-                            try_break!(net_outbound_tx.send(ack).await);
+                            try_break!(peer_outbound_tx.send(ack).await);
                         }
                         SocketPacketType::SynAck => {
                             // transition to established state
@@ -346,7 +376,7 @@ fn start_receiver_worker(
                     SocketPacketType::Data => {
                         // send ack
                         try_break!(
-                            net_outbound_tx
+                            peer_outbound_tx
                                 .send(SocketPacket::new(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
@@ -401,7 +431,7 @@ fn start_receiver_worker(
                                                     continue;
                                                 }
                                             };
-                                            match net_outbound_tx
+                                            match peer_outbound_tx
                                                 .send(SocketPacket::new(
                                                     SocketPacketType::Data,
                                                     0,
@@ -435,7 +465,7 @@ fn start_receiver_worker(
                                             let first_ = crypto.write().await.encrypt(&buf_.to_vec());
                                             match first_ {
                                                 Ok(first) => {
-                                                    match net_outbound_tx
+                                                    match peer_outbound_tx
                                                         .send(SocketPacket::new(
                                                             SocketPacketType::Data,
                                                             0,
@@ -485,6 +515,48 @@ fn start_receiver_worker(
                     }
                 },
                 PeerState::Dead => {}
+            }
+        }
+    });
+}
+
+fn start_crypto_receiver_worker(
+    state: Arc<RwLock<PeerState>>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
+    peer_inbound_tx: mpsc::Sender<SocketPacket>,
+    mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
+    crypto: Arc<RwLock<Crypto>>
+) {
+    tokio::task::spawn(async move {
+        loop {
+            let mut packet: SocketPacket = match net_inbound_rx.recv().await {
+                Some(packet) => packet,
+                None => break,
+            };
+            match peer_inbound_tx.send(packet).await {
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+fn start_crypto_sender_worker(
+    state: Arc<RwLock<PeerState>>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
+    peer_inbound_tx: mpsc::Sender<SocketPacket>,
+    mut peer_outbound_rx: mpsc::Receiver<SocketPacket>,
+    crypto: Arc<RwLock<Crypto>>
+) {
+    tokio::task::spawn(async move {
+        loop {
+            let mut packet: SocketPacket = match peer_outbound_rx.recv().await {
+                Some(packet) => packet,
+                None => break,
+            };
+            match net_outbound_tx.send(packet).await {
+                Ok(_) => {}
+                Err(_) => break,
             }
         }
     });
