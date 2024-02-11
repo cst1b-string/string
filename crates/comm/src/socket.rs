@@ -316,6 +316,8 @@ pub enum SocketPacketType {
     SynAck,
     /// Packets sent by either peer to keep the connection alive. This is done to avoid stateful firewalls from dropping the connection.
     Heartbeat,
+    /// Packets sent for key exchange. Contains DH and DR keys
+    Kex,
     /// Actual communication data
     Data,
     /// An invalid packet.
@@ -329,7 +331,8 @@ impl From<u8> for SocketPacketType {
             1 => SocketPacketType::Ack,
             2 => SocketPacketType::SynAck,
             3 => SocketPacketType::Heartbeat,
-            4 => SocketPacketType::Data,
+            4 => SocketPacketType::Kex,
+            5 => SocketPacketType::Data,
             _ => SocketPacketType::Invalid,
         }
     }

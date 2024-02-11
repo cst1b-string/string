@@ -131,6 +131,7 @@ impl Peer {
                 net_outbound_tx.clone(),
                 peer_inbound_tx.clone(),
                 net_inbound_rx,
+                peer_outbound_tx.clone(), // For sending first packet
                 crypto.clone()
             )
         });
@@ -188,8 +189,10 @@ fn start_peer_sender_worker(
                 warn!("peer is dead, breaking out of sender worker loop");
                 break;
             }
-            // We're initiating, let's send a Syn to kickstart the process
-            if current_state == PeerState::Init {
+            // Send syn regardless of which end we are
+            // Only the receiving side will acknowledge
+            if current_state == PeerState::Init
+            || current_state == PeerState::Connect {
                 try_break!(
                 peer_outbound_tx
                     .send(SocketPacket::new(
@@ -226,15 +229,10 @@ fn start_peer_sender_worker(
             };
 
             // split packet into network packets and send
-            for chunk in buf
+            for net_packet in buf
                 .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
+                .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, false, chunk))
             {
-                let mut crypto_ = crypto.write().await;
-                let actual_chunk = match crypto_.encrypt(&chunk.to_vec()) {
-                    Ok(enc) => enc,
-                    Err(_) => { continue; }
-                };
-                let net_packet = SocketPacket::new(SocketPacketType::Data, 0, 0, true, actual_chunk);
                 match peer_outbound_tx.send(net_packet).await {
                     Ok(_) => {}
                     Err(_) => break,
@@ -305,33 +303,11 @@ fn start_peer_receiver_worker(
                                 "state transition"
                             );
                             *state.write().await = PeerState::KeyInit;
-
-                            // A bit hackish
-                            {
-                                let key_init_packet = crypto.read().await.kex_packet();
-                                let buf = match try_encode_packet(&key_init_packet) {
-                                    Ok(buf) => buf,
-                                    Err(e) => {
-                                        eprintln!("Failed to encode packet: {:?}", e);
-                                        continue;
-                                    }
-                                };
-                                try_break!(
-                                    peer_outbound_tx
-                                    .send(SocketPacket::new(
-                                        SocketPacketType::Data,
-                                        0,
-                                        0,
-                                        false,
-                                        buf,
-                                    ))
-                                    .await
-                                );
-                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
-                        | SocketPacketType::Invalid => {}
+                        | SocketPacketType::Invalid
+                        | SocketPacketType::Kex => {}
                     }
                 }
                 PeerState::Connect => {
@@ -350,17 +326,10 @@ fn start_peer_receiver_worker(
                             // write to network
                             try_break!(peer_outbound_tx.send(ack).await);
                         }
-                        SocketPacketType::SynAck => {
-                            // transition to established state
-                            debug!(
-                                ?current_state,
-                                next = ?PeerState::KeyRecv,
-                                "state transition"
-                            );
-                            *state.write().await = PeerState::KeyRecv;
-                        }
+                        SocketPacketType::SynAck => {}
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
+                        | SocketPacketType::Kex
                         | SocketPacketType::Invalid => {}
                     }
                 }
@@ -372,6 +341,7 @@ fn start_peer_receiver_worker(
                     | SocketPacketType::Ack
                     | SocketPacketType::SynAck
                     | SocketPacketType::Heartbeat
+                    | SocketPacketType::Kex
                     | SocketPacketType::Invalid => {}
                     SocketPacketType::Data => {
                         // send ack
@@ -386,14 +356,6 @@ fn start_peer_receiver_worker(
                                 ))
                                 .await
                         );
-
-                        if packet.encrypted {
-                            let mut crypto_ = crypto.write().await;
-                            match crypto_.decrypt(&packet.data) {
-                                Ok(dec) => { packet.data = dec; }
-                                Err(_) => { continue; }
-                            }
-                        }
 
                         // add packet to queue
                         packet_queue.push(Reverse(packet));
@@ -415,95 +377,7 @@ fn start_peer_receiver_worker(
                             Err(_) => continue,
                         };
 
-                        if current_state == PeerState::KeyInit ||
-                            current_state == PeerState::KeyRecv {
-                            let result = crypto.write().await.handle_kex(packet, current_state);
-                            match result {
-                                Ok(_) => {
-                                    let mut next_state = PeerState::Established;
-                                    if current_state == PeerState::KeyRecv {
-                                        {
-                                            let key_recv_packet = crypto.read().await.kex_packet();
-                                            let buf = match try_encode_packet(&key_recv_packet) {
-                                                Ok(buf) => buf,
-                                                Err(e) => {
-                                                    eprintln!("Failed to encode packet: {:?}", e);
-                                                    continue;
-                                                }
-                                            };
-                                            match peer_outbound_tx
-                                                .send(SocketPacket::new(
-                                                    SocketPacketType::Data,
-                                                    0,
-                                                    0,
-                                                    false,
-                                                    buf,
-                                                ))
-                                                .await
-                                            {
-                                                Ok(_) => {}
-                                                Err(_) => {}
-                                            }
-                                        }
-                                        next_state = PeerState::AwaitFirst;
-                                    }
-                                    else {
-                                        {
-                                            let mut first_pkt = ProtocolPacket::default();
-                                            first_pkt.packet = Some(
-                                                packet::v1::packet::Packet::PktFirst(
-                                                    packet::v1::FirstPacket {}
-                                                )
-                                            );
-                                            let buf_ = match try_encode_packet(&first_pkt) {
-                                                Ok(buf) => buf,
-                                                Err(e) => {
-                                                    eprintln!("Failed to encode packet: {:?}", e);
-                                                    continue;
-                                                }
-                                            };
-                                            let first_ = crypto.write().await.encrypt(&buf_.to_vec());
-                                            match first_ {
-                                                Ok(first) => {
-                                                    match peer_outbound_tx
-                                                        .send(SocketPacket::new(
-                                                            SocketPacketType::Data,
-                                                            0,
-                                                            0,
-                                                            true,
-                                                            first,
-                                                        ))
-                                                        .await
-                                                    {
-                                                        Ok(_) => {}
-                                                        Err(_) => {}
-                                                    }
-                                                }
-                                                Err(_) => {}
-                                            }
-                                        }
-                                    }
-                                    debug!(
-                                        ?current_state,
-                                        next = ?next_state,
-                                        "state transition"
-                                    );
-                                    *state.write().await = next_state;
-                                }
-                                Err(_) => {}
-                            }
-                        }
-                        else if current_state == PeerState::AwaitFirst {
-                            {
-                                debug!(
-                                    ?current_state,
-                                    next = ?PeerState::AwaitFirst,
-                                    "state transition"
-                                );
-                                *state.write().await = PeerState::Established;
-                            }
-                        }
-                        else if current_state == PeerState::Established {
+                        if current_state == PeerState::Established {
                             // forward to application
                             debug!(?packet, "forward packet to application");
                             try_break!(app_inbound_tx.send(packet).await);
@@ -525,17 +399,155 @@ fn start_crypto_receiver_worker(
     net_outbound_tx: mpsc::Sender<SocketPacket>,
     peer_inbound_tx: mpsc::Sender<SocketPacket>,
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
+    peer_outbound_tx: mpsc::Sender<SocketPacket>,
     crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         loop {
             let mut packet: SocketPacket = match net_inbound_rx.recv().await {
                 Some(packet) => packet,
-                None => break,
+                None => { continue; }
             };
-            match peer_inbound_tx.send(packet).await {
-                Ok(_) => {}
-                Err(_) => break,
+
+            let current_state = { *state.read().await };
+            debug!(
+                state = ?current_state,
+                packet = ?packet.packet_type,
+                "crypto received packet"
+            );
+            // Should be pass this packet to peer?
+            let mut pass_packet = true;
+            match packet.packet_type {
+                SocketPacketType::Kex => {
+                    let packet_ = match try_decode_packet(packet.data.clone()) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    match current_state {
+                        PeerState::KeyRecv => {
+                            // We are "Bob", or the passive receiving side.
+                            // On kex packet, we send our keys to "Alice", and then
+                            // wait for the compulsory first message from Alice to kickstart DR
+                            let result = crypto.write().await.handle_kex(packet_, current_state);
+                            match result {
+                                Ok(_) => {
+                                    let key_recv_packet = crypto.read().await.kex_packet();
+                                    let buf = match try_encode_packet(&key_recv_packet) {
+                                        Ok(buf) => buf,
+                                        Err(e) => {
+                                            eprintln!("Failed to encode packet: {:?}", e);
+                                            continue;
+                                        }
+                                    };
+                                    match net_outbound_tx
+                                        .send(SocketPacket::new(
+                                            SocketPacketType::Kex,
+                                            0,
+                                            0,
+                                            false,
+                                            buf,
+                                        ))
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(_) => {}
+                                    }
+                                    { *state.write().await = PeerState::AwaitFirst };
+                                    pass_packet = false;
+                                },
+                                Err(_) => {}
+                            }
+                        },
+                        PeerState::KeyInit => {
+                            // We are "Alice", or the active sending side.
+                            // We have received our reply from bob,
+                            // now we encrypt an empty first message to send to bob
+                            let result = crypto.write().await.handle_kex(packet_, current_state);
+                            match result {
+                                Ok(_) => {
+                                    let mut first_pkt = ProtocolPacket::default();
+                                    first_pkt.packet = Some(
+                                        packet::v1::packet::Packet::PktFirst(
+                                            packet::v1::FirstPacket {}
+                                        )
+                                    );
+                                    let buf = match try_encode_packet(&first_pkt) {
+                                        Ok(buf_) => buf_,
+                                        Err(e) => {
+                                            eprintln!("Failed to encode packet: {:?}", e);
+                                            continue;
+                                        }
+                                    };
+                                    debug!(
+                                        ?current_state,
+                                        next = ?PeerState::Established,
+                                        "state transition"
+                                    );
+                                    *state.write().await = PeerState::Established;
+                                    match peer_outbound_tx
+                                        .send(SocketPacket::new(
+                                            SocketPacketType::Data,
+                                            0,
+                                            0,
+                                            false,
+                                            buf,
+                                        ))
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(_) => {}
+                                    }
+                                },
+                                Err(_) => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                },
+                SocketPacketType::Data => {
+                    match current_state {
+                        PeerState::AwaitFirst => {
+                            // We are "Bob", we have received our first empty encrypted message
+                            // from "Alice", so we decrypt it but do not pass on to app
+                            // because it's not a real message
+                            debug!(
+                                ?current_state,
+                                next = ?PeerState::AwaitFirst,
+                                "state transition"
+                            );
+                            { *state.write().await = PeerState::Established; }
+                            pass_packet = false;
+                        },
+                        _ => {}
+                    }
+                },
+                SocketPacketType::SynAck => {
+                    // I am "Bob", ready to receive key from "Alice"
+                    // We are supposed to do this in the peer receiver thread
+                    // But due to code below in the sender to send a SynAck and a Kex
+                    // in rapid succession, by the time the peer transitions state
+                    // it would be too late
+                    debug!(
+                        ?current_state,
+                        next = ?PeerState::KeyRecv,
+                        "state transition"
+                    );
+                    *state.write().await = PeerState::KeyRecv;
+                },
+                _ => {}
+            };
+            if packet.encrypted {
+                let mut crypto_ = crypto.write().await;
+                match crypto_.decrypt(&packet.data) {
+                    Ok(dec) => { packet.data = dec; }
+                    Err(_) => { continue; }
+                }
+            }
+            if pass_packet {
+                match peer_inbound_tx.send(packet).await {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
             }
         }
     });
@@ -554,9 +566,58 @@ fn start_crypto_sender_worker(
                 Some(packet) => packet,
                 None => break,
             };
-            match net_outbound_tx.send(packet).await {
-                Ok(_) => {}
-                Err(_) => break,
+
+            let current_state = { *state.read().await };
+
+            // Usually we just need to forward the one packet from peer to net
+            // However, when we see a SynAck sent, we are initiating side ("Alice")
+            // We should follow the SynAck with a Kex, which will be pushed into this queue
+            let mut packet_queue: Vec<SocketPacket> = Vec::new();
+            let packet_data: Vec<u8> = packet.data.clone();
+            let packet_type = packet.packet_type.clone();
+            packet_queue.push(packet);
+
+            match packet_type {
+                SocketPacketType::Data => {
+                    match current_state {
+                        PeerState::Established => {
+                            // Encrypt data packet before sending
+                            let mut crypto_ = crypto.write().await;
+                            let actual = match crypto_.encrypt(&packet_data) {
+                                Ok(enc) => enc,
+                                Err(_) => { continue; }
+                            };
+                            let _ = packet_queue.pop();
+                            packet_queue.push(SocketPacket::new(SocketPacketType::Data, 0, 0, true, actual));
+                        },
+                        _ => {}
+                    }
+                },
+                 SocketPacketType::SynAck => {
+                    let key_init_packet = crypto.read().await.kex_packet();
+                    let buf = match try_encode_packet(&key_init_packet) {
+                        Ok(buf) => buf,
+                        Err(e) => {
+                            eprintln!("Failed to encode packet: {:?}", e);
+                            continue;
+                        }
+                    };
+                    packet_queue.push(SocketPacket::new(
+                            SocketPacketType::Kex,
+                            0,
+                            0,
+                            false,
+                            buf
+                        )
+                    );
+                 },
+                 _ => {}
+            };
+            for queued_packet in packet_queue {
+                match net_outbound_tx.send(queued_packet).await {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
             }
         }
     });
