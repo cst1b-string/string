@@ -2,7 +2,7 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{try_decode_packet, try_encode_packet, ProtocolPacket};
+use protocol::{try_decode_packet, try_encode_packet, ProtocolPacket, packet};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -39,6 +39,7 @@ pub enum PeerState {
     Connect,
     KeyInit,
     KeyRecv,
+    AwaitFirst,
     Established,
     Dead,
 }
@@ -165,6 +166,7 @@ fn start_sender_worker(
                         SocketPacketType::Syn,
                         syns_sent,
                         0,
+                        false,
                         vec![],
                     ))
                     .await
@@ -194,10 +196,15 @@ fn start_sender_worker(
             };
 
             // split packet into network packets and send
-            for net_packet in buf
+            for chunk in buf
                 .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
-                .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
             {
+                let mut crypto_ = crypto.write().await;
+                let actual_chunk = match crypto_.encrypt(&chunk.to_vec()) {
+                    Ok(enc) => enc,
+                    Err(_) => { continue; }
+                };
+                let net_packet = SocketPacket::new(SocketPacketType::Data, 0, 0, true, actual_chunk);
                 match net_outbound_tx.send(net_packet).await {
                     Ok(_) => {}
                     Err(_) => break,
@@ -225,7 +232,7 @@ fn start_receiver_worker(
             trace!("start_receiver_worker loop");
 
             // receive packet from network
-            let packet: SocketPacket = match net_inbound_rx.recv().await {
+            let mut packet: SocketPacket = match net_inbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
@@ -256,6 +263,7 @@ fn start_receiver_worker(
                                         SocketPacketType::SynAck,
                                         packet.packet_number + 1,
                                         0,
+                                        false,
                                         vec![],
                                     ))
                                     .await
@@ -284,6 +292,7 @@ fn start_receiver_worker(
                                         SocketPacketType::Data,
                                         0,
                                         0,
+                                        false,
                                         buf,
                                     ))
                                     .await
@@ -305,6 +314,7 @@ fn start_receiver_worker(
                                 SocketPacketType::Ack,
                                 packet.packet_number + 1,
                                 0,
+                                false,
                                 vec![],
                             );
                             // write to network
@@ -326,7 +336,8 @@ fn start_receiver_worker(
                 }
                 PeerState::Established
                 | PeerState::KeyRecv
-                | PeerState::KeyInit => match packet.packet_type {
+                | PeerState::KeyInit
+                | PeerState::AwaitFirst => match packet.packet_type {
                     SocketPacketType::Syn
                     | SocketPacketType::Ack
                     | SocketPacketType::SynAck
@@ -340,10 +351,19 @@ fn start_receiver_worker(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
                                     0,
+                                    false,
                                     vec![],
                                 ))
                                 .await
                         );
+
+                        if packet.encrypted {
+                            let mut crypto_ = crypto.write().await;
+                            match crypto_.decrypt(&packet.data) {
+                                Ok(dec) => { packet.data = dec; }
+                                Err(_) => { continue; }
+                            }
+                        }
 
                         // add packet to queue
                         packet_queue.push(Reverse(packet));
@@ -367,9 +387,10 @@ fn start_receiver_worker(
 
                         if current_state == PeerState::KeyInit ||
                             current_state == PeerState::KeyRecv {
-                            let result = crypto.write().await.handle_crypto(packet, current_state);
+                            let result = crypto.write().await.handle_kex(packet, current_state);
                             match result {
                                 Ok(_) => {
+                                    let mut next_state = PeerState::Established;
                                     if current_state == PeerState::KeyRecv {
                                         {
                                             let key_recv_packet = crypto.read().await.kex_packet();
@@ -385,6 +406,7 @@ fn start_receiver_worker(
                                                     SocketPacketType::Data,
                                                     0,
                                                     0,
+                                                    false,
                                                     buf,
                                                 ))
                                                 .await
@@ -393,18 +415,65 @@ fn start_receiver_worker(
                                                 Err(_) => {}
                                             }
                                         }
+                                        next_state = PeerState::AwaitFirst;
+                                    }
+                                    else {
+                                        {
+                                            let mut first_pkt = ProtocolPacket::default();
+                                            first_pkt.packet = Some(
+                                                packet::v1::packet::Packet::PktFirst(
+                                                    packet::v1::FirstPacket {}
+                                                )
+                                            );
+                                            let buf_ = match try_encode_packet(&first_pkt) {
+                                                Ok(buf) => buf,
+                                                Err(e) => {
+                                                    eprintln!("Failed to encode packet: {:?}", e);
+                                                    continue;
+                                                }
+                                            };
+                                            let first_ = crypto.write().await.encrypt(&buf_.to_vec());
+                                            match first_ {
+                                                Ok(first) => {
+                                                    match net_outbound_tx
+                                                        .send(SocketPacket::new(
+                                                            SocketPacketType::Data,
+                                                            0,
+                                                            0,
+                                                            true,
+                                                            first,
+                                                        ))
+                                                        .await
+                                                    {
+                                                        Ok(_) => {}
+                                                        Err(_) => {}
+                                                    }
+                                                }
+                                                Err(_) => {}
+                                            }
+                                        }
                                     }
                                     debug!(
                                         ?current_state,
-                                        next = ?PeerState::Established,
+                                        next = ?next_state,
                                         "state transition"
                                     );
-                                    *state.write().await = PeerState::Established;
+                                    *state.write().await = next_state;
                                 }
                                 Err(_) => {}
                             }
                         }
-                        else {
+                        else if current_state == PeerState::AwaitFirst {
+                            {
+                                debug!(
+                                    ?current_state,
+                                    next = ?PeerState::AwaitFirst,
+                                    "state transition"
+                                );
+                                *state.write().await = PeerState::Established;
+                            }
+                        }
+                        else if current_state == PeerState::Established {
                             // forward to application
                             debug!(?packet, "forward packet to application");
                             try_break!(app_inbound_tx.send(packet).await);

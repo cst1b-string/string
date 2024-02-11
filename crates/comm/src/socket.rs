@@ -23,8 +23,8 @@ use crate::peer::{Peer, PeerError, PeerState};
 pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
 
 /// The minimum size of an encoded [SocketPacket].
-// 3 (Magic) + 1 (Packet type) + 4 (Packet number) + 4 (Chunk number) + 4 (Data length)
-pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
+// 3 (Magic) + 1 (Packet type) + 4 (Packet number) + 4 (Chunk number) + 4 (Data length) + 1 (Encrypted)
+pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4 + 1;
 
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
@@ -265,6 +265,8 @@ pub struct SocketPacket {
     pub chunk_number: u32,
     /// The length of the packet
     pub data_length: u32,
+    // Is this packet encrypted?
+    pub encrypted: bool,
     /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
     pub data: Vec<u8>,
 }
@@ -339,6 +341,7 @@ impl SocketPacket {
         packet_type: SocketPacketType,
         packet_number: u32,
         chunk_number: u32,
+        encrypted: bool,
         data: Data,
     ) -> Self
     where
@@ -349,6 +352,7 @@ impl SocketPacket {
             packet_number,
             chunk_number,
             data_length: data.as_ref().len() as u32,
+            encrypted,
             data: Vec::from(data.as_ref()),
         }
     }
@@ -363,6 +367,7 @@ impl SocketPacket {
         buf.write_u32::<BigEndian>(self.packet_number)?;
         buf.write_u32::<BigEndian>(self.chunk_number)?;
         buf.write_u32::<BigEndian>(self.data_length)?;
+        buf.write_u8(self.encrypted as u8)?;
 
         // write data
         buf.write_all(&self.data)?;
@@ -396,12 +401,14 @@ impl SocketPacket {
         let packet_number = reader.read_u32::<BigEndian>()?;
         let chunk_number = reader.read_u32::<BigEndian>()?;
         let data_length = reader.read_u32::<BigEndian>()?;
+        let encrypted = reader.read_u8()?;
 
         if (data_length as usize) == 0 {
             return Ok(SocketPacket::new(
                 packet_type,
                 packet_number,
                 chunk_number,
+                encrypted != 0,
                 vec![],
             ));
         }
@@ -414,6 +421,7 @@ impl SocketPacket {
             packet_type,
             packet_number,
             chunk_number,
+            encrypted != 0,
             data,
         ))
     }

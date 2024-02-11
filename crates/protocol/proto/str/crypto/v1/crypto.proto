@@ -7,6 +7,6 @@ syntax = "proto3";
 package str.crypto.v1;
 
 message Crypto {
-	bytes dh_key = 1; // DH key to establish shared_secret
-	bytes dr_key = 2; // DH key too, but now for DR
+	bytes dh_pubkey = 1; // DH pub key to establish shared_secret
+	bytes dr_pubkey = 2;    // DR pub key too
 }
