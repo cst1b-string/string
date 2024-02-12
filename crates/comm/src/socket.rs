@@ -1,7 +1,7 @@
 //! Defines the UDP socket abstraction and first-layer packet format used for communication between peers.
 
 use std::{
-    cmp::Ordering,
+    cmp::{self, Ordering},
     collections::HashMap,
     io::{self, Cursor, Read, Write},
     net::SocketAddr,
@@ -17,7 +17,8 @@ use tokio::{
 };
 use tracing::{debug, span, trace};
 
-use crate::peer::{Peer, PeerError, PeerState};
+use crate::peer::{Peer, PeerError, PeerState, CHANNEL_SIZE};
+use rand::{seq::SliceRandom, rngs::OsRng};
 
 /// The magic number used to identify packets sent over the network.
 pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
@@ -29,6 +30,12 @@ pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4 + 1;
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 
+/// May extend in future, hence why this is not just a pair
+pub struct Gossip {
+    pub peer_id: SocketAddr,
+    pub packet: ProtocolPacket
+}
+
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
 pub struct Socket {
@@ -36,6 +43,10 @@ pub struct Socket {
     inner: Arc<UdpSocket>,
     /// A map of connections to other peers.
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    /// A channel for peers to tell the socket to spread a gossip packet
+    gossip_tx: mpsc::Sender<Gossip>,
+    /// Name of this socket, will be used to identify self in network
+    name: String
 }
 
 /// An enumeration of possible errors that can occur when working with [Socket].
@@ -87,7 +98,7 @@ pub enum SocketPacketDecodeError {
 impl Socket {
     /// Create a new `Socket` that is bound to the given address. This method also
     /// starts the background tasks that handle sending and receiving packets.
-    pub async fn bind(addr: SocketAddr) -> Result<Self, SocketError> {
+    pub async fn bind(addr: SocketAddr, name: String) -> Result<Self, SocketError> {
         // bind socket
         let socket: Arc<_> = UdpSocket::bind(addr)
             .await
@@ -101,9 +112,17 @@ impl Socket {
         span!(tracing::Level::INFO, "socket::outbound")
             .in_scope(|| start_outbound_worker(socket.clone(), peers.clone()));
 
+        let (gossip_tx, gossip_rx) = mpsc::channel(CHANNEL_SIZE);
+
+        // start the gossip rebroadcast worker
+        span!(tracing::Level::INFO, "socket::gossip")
+            .in_scope(|| start_gossip_worker(name.clone(), gossip_rx, peers.clone()));
+
         Ok(Self {
             inner: socket,
             peers,
+            gossip_tx,
+            name
         })
     }
 
@@ -114,7 +133,10 @@ impl Socket {
         addr: SocketAddr,
         initiate: bool
     ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
-        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr, initiate);
+        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr,
+                                                                self.name.clone(),
+                                                                self.gossip_tx.clone(),
+                                                                initiate);
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
         // spawn the inbound peer task
@@ -242,6 +264,50 @@ fn spawn_inbound_peer_task(
             debug!(?destination, len = bytes.len(), "send packet to network");
             if let Err(e) = socket.send_to(&bytes, destination).await {
                 eprintln!("Error sending packet to network: {:?}", e);
+            }
+        }
+    });
+}
+
+// Number of peers to send gossip to
+pub const GOSSIP_CNT: usize = 3;
+
+fn start_gossip_worker(
+    _name: String,
+    mut gossip_rx: mpsc::Receiver<Gossip>,
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>
+) {
+    tokio::spawn(async move {
+        loop {
+            trace!("start gossip receiver task loop");
+            // receive packet from peer
+            let gossip = match gossip_rx.recv().await {
+                Some(g) => g,
+                None => break,
+            };
+
+            let mut peer_addrs: Vec<SocketAddr> = { peers.read().await.keys().cloned().collect() };
+            let peer_cnt: usize = peer_addrs.len();
+
+            // Exclude the source peer from receiving the gossip
+            let peer_id = match peer_addrs.iter().position(|&x| x == gossip.peer_id) {
+                Some(p) => p,
+                None => continue
+            };
+            let _ = peer_addrs.remove(peer_id);
+
+            let gossip_cnt = cmp::min(peer_cnt, GOSSIP_CNT);
+            let gossip_targets: Vec<SocketAddr> = peer_addrs.choose_multiple(&mut OsRng, gossip_cnt).cloned().collect();
+
+            for target in gossip_targets {
+                {
+                    let mut peers_ = peers.write().await;
+                    let target_peer = peers_.get_mut(&target);
+                    match target_peer.expect("No such peer").send_packet(gossip.packet.clone()).await {
+                        Ok(_) => {},
+                        Err(_) => {}
+                    }
+                }
             }
         }
     });

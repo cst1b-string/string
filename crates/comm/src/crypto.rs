@@ -60,7 +60,8 @@ impl Crypto {
     ) -> Result<(), CryptoError> {
         match packet.packet {
             Some(packet::v1::packet::Packet::PktMessage(_))
-            | Some(packet::v1::packet::Packet::PktFirst(_)) => {
+            | Some(packet::v1::packet::Packet::PktFirst(_))
+            | Some(packet::v1::packet::Packet::PktGossip(_)) => {
                 return Err(CryptoError::NonKexFail);
             }
             Some(packet::v1::packet::Packet::PktCrypto(crypto_pkt)) => {

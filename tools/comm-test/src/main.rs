@@ -18,6 +18,8 @@ struct Args {
     /// Whether to initiate the connection.
     #[clap(long)]
     initiate: bool,
+    #[clap(long)]
+    username: String
 }
 
 #[tokio::main]
@@ -26,6 +28,7 @@ async fn main() {
         bind_port,
         initiate,
         peer_addrs,
+        username
     } = Args::parse();
 
     // initialise tracing
@@ -38,7 +41,7 @@ async fn main() {
         .init();
 
     // bind to the socket
-    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port).into()).await {
+    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), username.clone()).await {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -51,7 +54,7 @@ async fn main() {
     let mut receivers: Vec<mpsc::Receiver<ProtocolPacket>> = Vec::new();
 
     for peer_addr in &peer_addrs {
-        let (app_outbound_tx, mut app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
+        let (app_outbound_tx, app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
         senders.push(app_outbound_tx);
         receivers.push(app_inbound_rx);
     }
@@ -94,15 +97,14 @@ async fn main() {
 
     tokio::task::spawn(async move {
         loop {
-            for (i, mut app_inbound_rx) in receivers.iter_mut().enumerate() {
+            for (_i, app_inbound_rx) in receivers.iter_mut().enumerate() {
                 match app_inbound_rx.try_recv() {
                     Ok(recv) => {
                         match recv.packet {
                             Some(packet::v1::packet::Packet::PktMessage(m)) => {
-                                info!("<{0}>: {1}", peer_addrs[i], m.content);
+                                info!("<{0}>: {1}", m.username, m.content);
                             },
-                            Some(packet::v1::packet::Packet::PktCrypto(_)) => {},
-                            Some(packet::v1::packet::Packet::PktFirst(_)) => {}
+                            Some(_) => {},
                             None => {}
                         }
                     },
@@ -118,15 +120,32 @@ async fn main() {
 
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
-                let trimmed = input.trim();
+                let mut trimmed = input.trim();
+                let mut gossip: bool = false;
+                if trimmed.starts_with("G ") {
+                    trimmed = &trimmed[2..];
+                    gossip = true;
+                }
                 let message = messages::v1::Message {
                     id: "test-id".to_string(),
                     channel_id: "test-channel".to_string(),
-                    username: "test-username".to_string(),
+                    username: username.to_string(),
                     content: trimmed.to_string(),
                     attachments: vec![]
                 };
-                pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
+                if gossip {
+                    let mut subpkt = ProtocolPacket::default();
+                    subpkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
+                    pkt.packet = Some(packet::v1::packet::Packet::PktGossip(
+                        Box::new(packet::v1::Gossip {
+                            peer_name: username.to_string(),
+                            content: Some(Box::new(subpkt))
+                        })
+                    ));
+                }
+                else {
+                    pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
+                }
                 for app_outbound_tx in &senders {
                     let _ = app_outbound_tx.send(pkt.clone()).await;
                 }

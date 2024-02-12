@@ -11,7 +11,7 @@ use tokio::sync::{
 use tracing::{debug, span, trace, warn, Level};
 
 use crate::socket::{
-    SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
+    SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip
 };
 use crate::crypto::Crypto;
 
@@ -26,7 +26,7 @@ macro_rules! try_break {
 }
 
 /// The buffer size of the various channels used for passing data between the network tasks.
-const CHANNEL_SIZE: usize = 32;
+pub const CHANNEL_SIZE: usize = 32;
 
 /// The maximum size of an [ProtocolPacket] chunk before it needs to be split into multiple
 /// [SocketPacket]s.
@@ -61,8 +61,10 @@ pub struct Peer {
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
     pub state: Arc<RwLock<PeerState>>,
-    // This object will handle the key exchange and encryption needs
+    /// This object will handle the key exchange and encryption needs
     pub crypto: Arc<RwLock<Crypto>>,
+    /// The channel used to broadcast gossip messages
+    pub gossip_tx: mpsc::Sender<Gossip>,
 }
 
 /// An enumeration of possible errors that can occur when working with peers.
@@ -81,6 +83,8 @@ impl Peer {
     #[tracing::instrument(name = "peer", skip(initiate))]
     pub fn new(
         remote_addr: SocketAddr,
+        socket_name: String,
+        gossip_tx: mpsc::Sender<Gossip>,
         initiate: bool,
     ) -> (
         Self,
@@ -112,7 +116,9 @@ impl Peer {
                 peer_outbound_tx.clone(),
                 app_inbound_tx.clone(),
                 peer_inbound_rx,
-                crypto.clone()
+                gossip_tx.clone(),
+                remote_addr,
+                socket_name
             )
         });
 
@@ -122,7 +128,7 @@ impl Peer {
                 peer_outbound_tx.clone(),
                 app_inbound_tx.clone(),
                 app_outbound_rx,
-                crypto.clone())
+                )
         });
 
         span!(Level::TRACE, "crypto::receiver", %remote_addr).in_scope(|| {
@@ -153,7 +159,8 @@ impl Peer {
                 app_outbound_tx,
                 net_inbound_tx,
                 state,
-                crypto
+                crypto,
+                gossip_tx
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -175,9 +182,8 @@ impl Peer {
 fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
     peer_outbound_tx: mpsc::Sender<SocketPacket>,
-    app_inbound_tx: mpsc::Sender<ProtocolPacket>,
+    _app_inbound_tx: mpsc::Sender<ProtocolPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
-    crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
@@ -249,7 +255,9 @@ fn start_peer_receiver_worker(
     peer_outbound_tx: mpsc::Sender<SocketPacket>,
     app_inbound_tx: mpsc::Sender<ProtocolPacket>,
     mut peer_inbound_rx: mpsc::Receiver<SocketPacket>,
-    crypto: Arc<RwLock<Crypto>>
+    gossip_tx: mpsc::Sender<Gossip>,
+    remote_addr: SocketAddr,
+    socket_name: String
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
@@ -260,7 +268,7 @@ fn start_peer_receiver_worker(
             trace!("start_peer_receiver_worker loop");
 
             // receive packet from crypto
-            let mut packet: SocketPacket = match peer_inbound_rx.recv().await {
+            let packet: SocketPacket = match peer_inbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
@@ -378,14 +386,36 @@ fn start_peer_receiver_worker(
                         };
 
                         if current_state == PeerState::Established {
-                            // forward to application
-                            debug!(?packet, "forward packet to application");
-                            try_break!(app_inbound_tx.send(packet).await);
-
-                            // clear queue
-                            debug!("clear packet queue");
-                            packet_queue.clear();
+                            let packet_ = packet.clone();
+                            match packet.packet {
+                                Some(packet::v1::packet::Packet::PktMessage(_)) => {
+                                    // forward to application
+                                    debug!(?packet, "forward packet to application");
+                                    try_break!(app_inbound_tx.send(packet).await);
+                                },
+                                Some(packet::v1::packet::Packet::PktGossip(gossip)) => {
+                                    if gossip.peer_name != socket_name {
+                                        match gossip.content {
+                                            Some(content) => {
+                                                try_break!(gossip_tx.send(Gossip {
+                                                    peer_id: remote_addr,
+                                                    packet: packet_
+                                                }).await);
+                                                debug!(?content, "forward packet to application");
+                                                try_break!(app_inbound_tx.send(*content).await);
+                                            },
+                                            None => {}
+                                        }
+                                    }
+                                },
+                                Some(_) => {},
+                                None => {}
+                            }
                         }
+
+                        // clear queue
+                        debug!("clear packet queue");
+                        packet_queue.clear();
                     }
                 },
                 PeerState::Dead => {}
@@ -556,13 +586,13 @@ fn start_crypto_receiver_worker(
 fn start_crypto_sender_worker(
     state: Arc<RwLock<PeerState>>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
-    peer_inbound_tx: mpsc::Sender<SocketPacket>,
+    _peer_inbound_tx: mpsc::Sender<SocketPacket>,
     mut peer_outbound_rx: mpsc::Receiver<SocketPacket>,
     crypto: Arc<RwLock<Crypto>>
 ) {
     tokio::task::spawn(async move {
         loop {
-            let mut packet: SocketPacket = match peer_outbound_rx.recv().await {
+            let packet: SocketPacket = match peer_outbound_rx.recv().await {
                 Some(packet) => packet,
                 None => break,
             };
