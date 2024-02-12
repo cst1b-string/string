@@ -78,6 +78,7 @@ impl NetworkPacket {
     where
         Data: AsRef<[u8]>,
     {
+		// compress the data using Gzip
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
         e.write_all(Data);
         let compressed_data = e.finish()?;
@@ -148,6 +149,7 @@ impl NetworkPacket {
         let mut compressed_data = vec![0; compressed_data_length as usize];
         reader.read_exact(&mut compressed_data)?;
 		
+		// decompress the data 
 		let mut data = vec![0; uncompressed_data_length as usize];
 		let mut gz_decoder = GzDecoder::new(&compressed_data[..]);
 		gz_decoder.read_exact(&mut data)?;
