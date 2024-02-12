@@ -5,6 +5,7 @@ use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use protocol::{ProtocolPacket, messages, packet};
 use std::io;
+use tokio::sync::mpsc;
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -12,7 +13,8 @@ struct Args {
     /// The source port to bind to.
     bind_port: u16,
     /// The destination IP address to add as a peer.
-    peer_addr: SocketAddr,
+    #[clap(value_delimiter = ',')]
+    peer_addrs: Vec<SocketAddr>,
     /// Whether to initiate the connection.
     #[clap(long)]
     initiate: bool,
@@ -23,7 +25,7 @@ async fn main() {
     let Args {
         bind_port,
         initiate,
-        peer_addr,
+        peer_addrs,
     } = Args::parse();
 
     // initialise tracing
@@ -44,53 +46,70 @@ async fn main() {
         }
     };
 
-    // add peer
-    let (app_outbound_tx, mut app_inbound_rx) = socket.add_peer(peer_addr, initiate).await;
+    // add peers
+    let mut senders: Vec<mpsc::Sender<ProtocolPacket>> = Vec::new();
+    let mut receivers: Vec<mpsc::Receiver<ProtocolPacket>> = Vec::new();
+
+    for peer_addr in &peer_addrs {
+        let (app_outbound_tx, mut app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
+        senders.push(app_outbound_tx);
+        receivers.push(app_inbound_rx);
+    }
 
     info!("[+] Setup success");
     info!("[*] Attempting transmission...");
 
-    let mut i: u16 = 0;
-    let mut ready: bool = false;
-
     // Wait 5 mins
-    while i < 5 * 60 * 2 && !ready {
-        match socket.get_peer_state(peer_addr).await {
-            None => {}
-            Some(s) => {
-                if s == PeerState::Established {
-                    ready = true;
+    let mut ready_peers: Vec<usize> = Vec::new();
+
+    let mut tick: u16 = 0;
+
+    while tick < 5 * 60 * 2 && ready_peers.len() != peer_addrs.len() {
+        for i in 0..peer_addrs.len() {
+            if !ready_peers.contains(&i) {
+                match socket.get_peer_state(peer_addrs[i]).await {
+                    None => {}
+                    Some(s) => {
+                        if s == PeerState::Established {
+                            info!("[+] Connection with {0} succeeded!", peer_addrs[i]);
+                            ready_peers.push(i);
+                        }
+                    }
                 }
             }
         }
-        i += 1;
+        tick += 1;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     // check if the connection is ready
-    if !ready {
+    if ready_peers.len() != peer_addrs.len() {
         error!("[-] Connection failure.");
         return;
     }
 
-    info!("[+] Connection with {0} succeeded!", peer_addr);
+    info!("[+] All connections succeeded!");
     info!("[+] Chat log follows below, enter any input to send:");
+
 
     tokio::task::spawn(async move {
         loop {
-            match app_inbound_rx.recv().await {
-                Some(recv) => {
-                    match recv.packet {
-                        Some(packet::v1::packet::Packet::PktMessage(m)) => {
-                            info!("<remote>: {0}", m.content);
-                        },
-                        Some(packet::v1::packet::Packet::PktCrypto(_)) => {},
-                        Some(packet::v1::packet::Packet::PktFirst(_)) => {}
-                        None => {}
-                    }
-                },
-                None => {}
-            };
+            for (i, mut app_inbound_rx) in receivers.iter_mut().enumerate() {
+                match app_inbound_rx.try_recv() {
+                    Ok(recv) => {
+                        match recv.packet {
+                            Some(packet::v1::packet::Packet::PktMessage(m)) => {
+                                info!("<{0}>: {1}", peer_addrs[i], m.content);
+                            },
+                            Some(packet::v1::packet::Packet::PktCrypto(_)) => {},
+                            Some(packet::v1::packet::Packet::PktFirst(_)) => {}
+                            None => {}
+                        }
+                    },
+                    Err(_) => {}
+                };
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     });
     loop {
@@ -108,7 +127,9 @@ async fn main() {
                     attachments: vec![]
                 };
                 pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
-                let _ = app_outbound_tx.send(pkt).await;
+                for app_outbound_tx in &senders {
+                    let _ = app_outbound_tx.send(pkt.clone()).await;
+                }
             }
             Err(_) => {}
         }
