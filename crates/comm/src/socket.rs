@@ -256,6 +256,7 @@ fn spawn_inbound_peer_task(
 /// - 4 bytes: Length of the data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
+#[derive(Debug, Clone)]
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,
