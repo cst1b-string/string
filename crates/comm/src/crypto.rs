@@ -38,6 +38,12 @@ impl fmt::Debug for Crypto {
     }
 }
 
+impl Default for Crypto {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Crypto {
     pub fn new() -> Self {
         let dh_secret = EphemeralSecret::random_from_rng(OsRng);
@@ -45,8 +51,8 @@ impl Crypto {
         Self {
             ratchet: None,
             shared_secret: None,
-            dh_secret: dh_secret,
-            dh_pubkey: dh_pubkey,
+            dh_secret,
+            dh_pubkey,
             dr_pubkey: None,
             associated_data: "Associated Data".into(),
         }
@@ -62,7 +68,7 @@ impl Crypto {
             Some(packet::v1::packet::Packet::PktMessage(_))
             | Some(packet::v1::packet::Packet::PktFirst(_))
             | Some(packet::v1::packet::Packet::PktGossip(_)) => {
-                return Err(CryptoError::NonKexFail);
+                Err(CryptoError::NonKexFail)
             }
             Some(packet::v1::packet::Packet::PktCrypto(crypto_pkt)) => {
                 let peer_dh_pubkey_bytes: [u8; 32] = crypto_pkt.dh_pubkey[..32].try_into().unwrap();
@@ -82,7 +88,7 @@ impl Crypto {
                             shared_secret = hex::encode(shared.as_bytes()),
                             "shared secret established"
                         );
-                        if crypto_pkt.dr_pubkey.len() == 0 {
+                        if crypto_pkt.dr_pubkey.is_empty() {
                             let (ratchet, dr_pubkey) = Ratchet::init_bob(shared.to_bytes());
                             debug!(
                                 pubkey = hex::encode(dr_pubkey.clone().as_bytes()),
@@ -105,10 +111,10 @@ impl Crypto {
                     None => {}
                 }
 
-                return Ok(());
+                Ok(())
             }
             None => {
-                return Err(CryptoError::NonKexFail);
+                Err(CryptoError::NonKexFail)
             }
         }
     }
@@ -121,7 +127,7 @@ impl Crypto {
         };
         let crypto = crypto::v1::Crypto {
             dh_pubkey: self.dh_pubkey.as_bytes().to_vec(),
-            dr_pubkey: dr_pubkey,
+            dr_pubkey,
         };
         pkt.packet = Some(packet::v1::packet::Packet::PktCrypto(crypto));
         pkt
@@ -141,10 +147,10 @@ impl Crypto {
                 let _ = size_encoded.write_u64::<BigEndian>(encrypted.len().try_into().unwrap());
                 let ciphertext =
                     [size_encoded, Vec::from(header), encrypted, nonce.to_vec()].concat();
-                return Ok(ciphertext);
+                Ok(ciphertext)
             }
             None => {
-                return Err(CryptoError::MissingRatchet);
+                Err(CryptoError::MissingRatchet)
             }
         }
     }
@@ -175,10 +181,10 @@ impl Crypto {
                     "decryption started"
                 );
                 let decrypted = ratchet.decrypt(&header, encrypted, &nonce, &self.associated_data);
-                return Ok(decrypted);
+                Ok(decrypted)
             }
             None => {
-                return Err(CryptoError::MissingRatchet);
+                Err(CryptoError::MissingRatchet)
             }
         }
     }

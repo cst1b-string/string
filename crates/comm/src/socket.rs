@@ -159,7 +159,7 @@ impl Socket {
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
         let connections = self.peers.read().await;
         if !connections.contains_key(&addr) {
-            return None;
+            None
         } else {
             let state = { *connections[&addr].state.read().await };
             Some(state)

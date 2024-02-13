@@ -486,9 +486,7 @@ fn start_crypto_receiver_worker(
                                         Ok(_) => {}
                                         Err(_) => {}
                                     }
-                                    {
-                                        *state.write().await = PeerState::AwaitFirst
-                                    };
+                                    *state.write().await = PeerState::AwaitFirst;
                                     pass_packet = false;
                                 }
                                 Err(_) => {}
@@ -614,7 +612,7 @@ fn start_crypto_sender_worker(
             // We should follow the SynAck with a Kex, which will be pushed into this queue
             let mut packet_queue: Vec<SocketPacket> = Vec::new();
             let packet_data: Vec<u8> = packet.data.clone();
-            let packet_type = packet.packet_type.clone();
+            let packet_type = packet.packet_type;
             packet_queue.push(packet);
 
             match packet_type {
