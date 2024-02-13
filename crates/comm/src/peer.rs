@@ -2,7 +2,10 @@
 
 use std::{cmp::Reverse, net::SocketAddr, sync::Arc, time::Duration};
 
-use protocol::{packet, try_decode_packet, try_encode_packet, ProtocolPacket};
+use protocol::{
+    packet::v1::FirstPacket, try_decode_packet, try_encode_packet, ProtocolPacket,
+    ProtocolPacketType,
+};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -60,6 +63,7 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
+    /// The current state of the peer.
     pub state: Arc<RwLock<PeerState>>,
     /// This object will handle the key exchange and encryption needs
     pub crypto: Arc<RwLock<Crypto>>,
@@ -108,7 +112,7 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
-        let crypto = Arc::new(RwLock::new(Crypto::new()));
+        let crypto = Arc::new(RwLock::new(Crypto::new_initiator()));
 
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
             start_peer_receiver_worker(
@@ -385,13 +389,13 @@ fn start_peer_receiver_worker(
 
                         if current_state == PeerState::Established {
                             let packet_ = packet.clone();
-                            match packet.packet {
-                                Some(packet::v1::packet::Packet::PktMessage(_)) => {
+                            match packet.packet_type {
+                                Some(ProtocolPacketType::PktMessage(_)) => {
                                     // forward to application
                                     debug!(?packet, "forward packet to application");
                                     try_break!(app_inbound_tx.send(packet).await);
                                 }
-                                Some(packet::v1::packet::Packet::PktGossip(gossip)) => {
+                                Some(ProtocolPacketType::PktGossip(gossip)) => {
                                     if gossip.peer_name != socket_name {
                                         match gossip.content {
                                             Some(content) => {
@@ -465,7 +469,7 @@ fn start_crypto_receiver_worker(
                             let result = crypto.write().await.handle_kex(packet_, current_state);
                             match result {
                                 Ok(_) => {
-                                    let key_recv_packet = crypto.read().await.kex_packet();
+                                    let key_recv_packet = crypto.read().await.generate_kex_packet();
                                     let buf = match try_encode_packet(&key_recv_packet) {
                                         Ok(buf) => buf,
                                         Err(e) => {
@@ -500,9 +504,8 @@ fn start_crypto_receiver_worker(
                             match result {
                                 Ok(_) => {
                                     let mut first_pkt = ProtocolPacket::default();
-                                    first_pkt.packet = Some(packet::v1::packet::Packet::PktFirst(
-                                        packet::v1::FirstPacket {},
-                                    ));
+                                    first_pkt.packet_type =
+                                        Some(ProtocolPacketType::PktFirst(FirstPacket {}));
                                     let buf = match try_encode_packet(&first_pkt) {
                                         Ok(buf_) => buf_,
                                         Err(e) => {
@@ -640,7 +643,7 @@ fn start_crypto_sender_worker(
                     }
                 }
                 SocketPacketType::SynAck => {
-                    let key_init_packet = crypto.read().await.kex_packet();
+                    let key_init_packet = crypto.read().await.generate_kex_packet();
                     let buf = match try_encode_packet(&key_init_packet) {
                         Ok(buf) => buf,
                         Err(e) => {
