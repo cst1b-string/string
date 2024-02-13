@@ -18,7 +18,7 @@ use tokio::{
 use tracing::{debug, span, trace};
 
 use crate::peer::{Peer, PeerError, PeerState, CHANNEL_SIZE};
-use rand::{seq::SliceRandom, rngs::OsRng};
+use rand::{rngs::OsRng, seq::SliceRandom};
 
 /// The magic number used to identify packets sent over the network.
 pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
@@ -33,7 +33,7 @@ pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 /// May extend in future, hence why this is not just a pair
 pub struct Gossip {
     pub peer_id: SocketAddr,
-    pub packet: ProtocolPacket
+    pub packet: ProtocolPacket,
 }
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
@@ -46,7 +46,7 @@ pub struct Socket {
     /// A channel for peers to tell the socket to spread a gossip packet
     gossip_tx: mpsc::Sender<Gossip>,
     /// Name of this socket, will be used to identify self in network
-    name: String
+    name: String,
 }
 
 /// An enumeration of possible errors that can occur when working with [Socket].
@@ -122,7 +122,7 @@ impl Socket {
             inner: socket,
             peers,
             gossip_tx,
-            name
+            name,
         })
     }
 
@@ -131,12 +131,10 @@ impl Socket {
     pub async fn add_peer(
         &mut self,
         addr: SocketAddr,
-        initiate: bool
+        initiate: bool,
     ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
-        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr,
-                                                                self.name.clone(),
-                                                                self.gossip_tx.clone(),
-                                                                initiate);
+        let (peer, app_inbound_rx, net_outbound_rx) =
+            Peer::new(addr, self.name.clone(), self.gossip_tx.clone(), initiate);
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
         // spawn the inbound peer task
@@ -158,15 +156,11 @@ impl Socket {
         (app_outbound_tx, app_inbound_rx)
     }
 
-    pub async fn get_peer_state(
-        &mut self,
-        addr: SocketAddr,
-    ) -> Option<PeerState> {
+    pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
         let connections = self.peers.read().await;
         if !connections.contains_key(&addr) {
             return None;
-        }
-        else {
+        } else {
             let state = { *connections[&addr].state.read().await };
             Some(state)
         }
@@ -275,7 +269,7 @@ pub const GOSSIP_CNT: usize = 3;
 fn start_gossip_worker(
     _name: String,
     mut gossip_rx: mpsc::Receiver<Gossip>,
-    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
 ) {
     tokio::spawn(async move {
         loop {
@@ -292,19 +286,26 @@ fn start_gossip_worker(
             // Exclude the source peer from receiving the gossip
             let peer_id = match peer_addrs.iter().position(|&x| x == gossip.peer_id) {
                 Some(p) => p,
-                None => continue
+                None => continue,
             };
             let _ = peer_addrs.remove(peer_id);
 
             let gossip_cnt = cmp::min(peer_cnt, GOSSIP_CNT);
-            let gossip_targets: Vec<SocketAddr> = peer_addrs.choose_multiple(&mut OsRng, gossip_cnt).cloned().collect();
+            let gossip_targets: Vec<SocketAddr> = peer_addrs
+                .choose_multiple(&mut OsRng, gossip_cnt)
+                .cloned()
+                .collect();
 
             for target in gossip_targets {
                 {
                     let mut peers_ = peers.write().await;
                     let target_peer = peers_.get_mut(&target);
-                    match target_peer.expect("No such peer").send_packet(gossip.packet.clone()).await {
-                        Ok(_) => {},
+                    match target_peer
+                        .expect("No such peer")
+                        .send_packet(gossip.packet.clone())
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(_) => {}
                     }
                 }
