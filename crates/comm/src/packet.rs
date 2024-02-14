@@ -133,7 +133,7 @@ impl NetworkPacket {
         let packet_type = reader.read_u8()?.into();
         let seq_number = reader.read_u32::<BigEndian>()?;
         let compressed_data_length = reader.read_u32::<BigEndian>()? as usize;
-        let uncompressed_data_length = reader.read_u32::<BigEndian>()?;
+        let uncompressed_data_length = reader.read_u32::<BigEndian>()? as usize;
 
         if (uncompressed_data_length as usize) == 0 {
             return Ok(NetworkPacket {
