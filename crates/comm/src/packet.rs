@@ -161,7 +161,7 @@ impl NetworkPacket {
     /// decompress the data
     pub fn decompress(&self) -> io::Result<Vec<u8>> {
         let mut data = vec![0; self.uncompressed_data_length as usize];
-        let mut gz_decoder = GzDecoder::new(&self.data[..]);
+        let mut gz_decoder = GzDecoder::new(self.data.as_slice());
         gz_decoder.read_exact(&mut data)?;
         Ok(data)
     }
