@@ -69,7 +69,7 @@ impl From<u8> for NetworkPacketType {
 
 impl NetworkPacket {
     /// Create a new packet with the given type, sequence number, and data.
-	/// NOTE: compresses the sent data
+    /// NOTE: compresses the sent data
     pub fn new<Data>(
         packet_type: NetworkPacketType,
         seq_number: u32,
@@ -78,9 +78,9 @@ impl NetworkPacket {
     where
         Data: AsRef<[u8]>,
     {
-		// compress the data using Gzip
+        // compress the data using Gzip
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
-        e.write_all(Data);
+        let _ = e.write_all(data.as_ref());
         let compressed_data = e.finish()?;
         Ok(Self {
             packet_type,
@@ -132,35 +132,38 @@ impl NetworkPacket {
         // read packet header
         let packet_type = reader.read_u8()?.into();
         let seq_number = reader.read_u32::<BigEndian>()?;
-        let compressed_data_length = reader.read_u32::<BigEndian>()? as usize;
-        let uncompressed_data_length = reader.read_u32::<BigEndian>()? as usize;
+        let compressed_data_length = reader.read_u32::<BigEndian>()?;
+        let uncompressed_data_length = reader.read_u32::<BigEndian>()?;
 
         if (uncompressed_data_length as usize) == 0 {
             return Ok(NetworkPacket {
                 packet_type,
                 seq_number,
-				compressed_data_length,
+                compressed_data_length,
                 uncompressed_data_length,
                 data: vec![],
             });
         }
 
         // read compressed data
-        let mut compressed_data = vec![0; compressed_data_length];
+        let mut compressed_data = vec![0; compressed_data_length as usize];
         reader.read_exact(&mut compressed_data)?;
-		
-		// decompress the data 
-		let mut data = vec![0; uncompressed_data_length];
-		let mut gz_decoder = GzDecoder::new(&compressed_data);
-		gz_decoder.read_exact(&mut data)?;
-		
+
         Ok(NetworkPacket {
             packet_type,
             seq_number,
-			compressed_data_length,
+            compressed_data_length,
             uncompressed_data_length,
-            data,
+            data: compressed_data,
         })
+    }
+
+    /// decompress the data
+    pub fn decompress(&self) -> io::Result<Vec<u8>> {
+        let mut data = vec![0; self.uncompressed_data_length as usize];
+        let mut gz_decoder = GzDecoder::new(&self.data[..]);
+        gz_decoder.read_exact(&mut data)?;
+        Ok(data)
     }
 }
 
