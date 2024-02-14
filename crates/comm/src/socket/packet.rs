@@ -27,11 +27,9 @@ pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 /// - 4 bytes: Magic number (0x010203)
 /// - 1 byte: Packet type (0 = SYN, 1 = ACK, 2 = SYNACK, 3 = HEARTBEAT, 4 = DATA)
 /// - 4 bytes: Sequence number
-/// - 4 bytes: Length of the compressed data
-/// - 4 bytes: Length of the uncompressed data
+/// - 4 bytes: Length of the data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
-#[derive(Debug, Clone)]
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,
@@ -39,12 +37,10 @@ pub struct SocketPacket {
     pub packet_number: u32,
     /// The chunk number of the packet. This is only used for data packets.
     pub chunk_number: u32,
-    /// The length of the packet, compressed.
-    pub compressed_data_length: u32,
-    /// The length of the packet
-    pub uncompressed_data_length: u32,
+    /// The length of the data within the packet.
+    pub data_length: u32,
     /// The packet data. This is empty for SYN, ACK, SYNACK, and HEARTBEAT packets.
-    pub compressed_data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl PartialEq for SocketPacket {
@@ -118,27 +114,22 @@ impl SocketPacket {
         packet_number: u32,
         chunk_number: u32,
         data: Data,
-    ) -> std::io::Result<Self>
+    ) -> io::Result<Self>
     where
         Data: AsRef<[u8]>,
     {
-        let data = data.as_ref();
-        let mut encoder = GzEncoder::new(vec![], Compression::default());
-        let _ = encoder.write_all(data);
-        let compressed_data = encoder.finish()?;
-
+        let data = data.as_ref().to_owned();
         Ok(Self {
             packet_type,
             packet_number,
             chunk_number,
-            uncompressed_data_length: data.len() as u32,
-            compressed_data_length: compressed_data.len() as u32,
-            compressed_data,
+            data_length: data.len() as u32,
+            data,
         })
     }
 
     /// Encode the packet into a byte buffer.
-    pub fn encode(&self) -> std::io::Result<Vec<u8>> {
+    pub fn encode(&self) -> io::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(MIN_SOCKET_PACKET_SIZE);
 
         // write header
@@ -146,11 +137,10 @@ impl SocketPacket {
         buf.write_u8(self.packet_type as u8)?;
         buf.write_u32::<BigEndian>(self.packet_number)?;
         buf.write_u32::<BigEndian>(self.chunk_number)?;
-        buf.write_u32::<BigEndian>(self.compressed_data_length)?;
-        buf.write_u32::<BigEndian>(self.uncompressed_data_length)?;
+        buf.write_u32::<BigEndian>(self.data_length)?;
 
         // write data
-        buf.write_all(&self.compressed_data)?;
+        buf.write_all(&self.data)?;
 
         Ok(buf)
     }
@@ -161,9 +151,8 @@ impl SocketPacket {
             packet_type,
             packet_number,
             chunk_number,
-            compressed_data: vec![],
-            compressed_data_length: 0,
-            uncompressed_data_length: 0,
+            data: vec![],
+            data_length: 0,
         }
     }
 
@@ -192,10 +181,9 @@ impl SocketPacket {
         let packet_type = reader.read_u8()?.into();
         let packet_number = reader.read_u32::<BigEndian>()?;
         let chunk_number = reader.read_u32::<BigEndian>()?;
-        let compressed_data_length = reader.read_u32::<BigEndian>()?;
-        let uncompressed_data_length = reader.read_u32::<BigEndian>()?;
+        let data_length = reader.read_u32::<BigEndian>()?;
 
-        if (uncompressed_data_length as usize) == 0 {
+        if (data_length as usize) == 0 {
             return Ok(SocketPacket::new(
                 packet_type,
                 packet_number,
@@ -205,7 +193,7 @@ impl SocketPacket {
         }
 
         // read data
-        let mut data = vec![0; compressed_data_length as usize];
+        let mut data = vec![0; data_length as usize];
         reader.read_exact(&mut data)?;
 
         Ok(SocketPacket::new(

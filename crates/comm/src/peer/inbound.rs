@@ -138,14 +138,14 @@ pub fn start_peer_receiver_worker(
                         // attempt to decode
                         let data_len: usize = packet_queue
                             .iter()
-                            .map(|Reverse(packet)| packet.compressed_data.len())
+                            .map(|Reverse(packet)| packet.data.len())
                             .sum();
 
                         let mut buf = Vec::with_capacity(data_len);
 
-                        packet_queue.iter().for_each(|Reverse(packet)| {
-                            buf.append(&mut packet.compressed_data.clone())
-                        });
+                        packet_queue
+                            .iter()
+                            .for_each(|Reverse(packet)| buf.append(&mut packet.data.clone()));
 
                         let packet = match try_decode_packet(buf) {
                             Ok(packet) => packet,
@@ -161,7 +161,7 @@ pub fn start_peer_receiver_worker(
 
                         match packet.packet_type {
                             Some(ProtocolPacketType::PktGossip(ref gossip)) => {
-                                // check if we are missing a signed ppacket
+                                // check if we are missing a signed packet
                                 if let None = gossip.packet {
                                     continue;
                                 }
