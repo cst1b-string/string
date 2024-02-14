@@ -146,7 +146,7 @@ impl NetworkPacket {
         }
 
         // read compressed data
-        let mut compressed_data = vec![0; compressed_data_length as usize];
+        let mut compressed_data = vec![0; compressed_data_length];
         reader.read_exact(&mut compressed_data)?;
 		
 		// decompress the data 
