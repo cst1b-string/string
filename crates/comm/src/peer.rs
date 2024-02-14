@@ -56,7 +56,7 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
-    pub state: Arc<RwLock<PeerState>>
+    pub state: Arc<RwLock<PeerState>>,
 }
 
 /// An enumeration of possible errors that can occur when working with peers.
@@ -113,7 +113,7 @@ impl Peer {
                 remote_addr,
                 app_outbound_tx,
                 net_inbound_tx,
-                state
+                state,
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -150,14 +150,9 @@ fn start_sender_worker(
             // We're initiating, let's send a Syn to kickstart the process
             if current_state == PeerState::Init {
                 try_break!(
-                net_outbound_tx
-                    .send(SocketPacket::new(
-                        SocketPacketType::Syn,
-                        syns_sent,
-                        0,
-                        vec![],
-                    ))
-                    .await
+                    net_outbound_tx
+                        .send(SocketPacket::empty(SocketPacketType::Syn, syns_sent, 0))
+                        .await
                 );
                 syns_sent += 1;
             }
@@ -188,7 +183,11 @@ fn start_sender_worker(
                 .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
                 .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
             {
-                match net_outbound_tx.send(net_packet).await {
+                // TODO: packet compression before we chunk to take advantage of patterns in the whole packet data
+                match net_outbound_tx
+                    .send(net_packet.expect("failed to compress packet"))
+                    .await
+                {
                     Ok(_) => {}
                     Err(_) => break,
                 }
@@ -241,11 +240,10 @@ fn start_receiver_worker(
                             // write to network
                             try_break!(
                                 net_outbound_tx
-                                    .send(SocketPacket::new(
+                                    .send(SocketPacket::empty(
                                         SocketPacketType::SynAck,
                                         packet.packet_number + 1,
                                         0,
-                                        vec![],
                                     ))
                                     .await
                             );
@@ -268,11 +266,10 @@ fn start_receiver_worker(
                             // responder never receives ACK
                         }
                         SocketPacketType::Syn => {
-                            let ack = SocketPacket::new(
+                            let ack = SocketPacket::empty(
                                 SocketPacketType::Ack,
                                 packet.packet_number + 1,
                                 0,
-                                vec![],
                             );
                             // write to network
                             try_break!(net_outbound_tx.send(ack).await);
@@ -301,11 +298,10 @@ fn start_receiver_worker(
                         // send ack
                         try_break!(
                             net_outbound_tx
-                                .send(SocketPacket::new(
+                                .send(SocketPacket::empty(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
                                     0,
-                                    vec![],
                                 ))
                                 .await
                         );
@@ -316,14 +312,14 @@ fn start_receiver_worker(
                         // attempt to decode
                         let data_len: usize = packet_queue
                             .iter()
-                            .map(|Reverse(packet)| packet.data.len())
+                            .map(|Reverse(packet)| packet.compressed_data.len())
                             .sum();
 
                         let mut buf = Vec::with_capacity(data_len);
 
-                        packet_queue
-                            .iter()
-                            .for_each(|Reverse(packet)| buf.append(&mut packet.data.clone()));
+                        packet_queue.iter().for_each(|Reverse(packet)| {
+                            buf.append(&mut packet.compressed_data.clone())
+                        });
 
                         let packet = match try_decode_packet(buf) {
                             Ok(packet) => packet,
