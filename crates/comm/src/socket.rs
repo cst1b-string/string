@@ -430,7 +430,7 @@ impl SocketPacket {
         }
 
         // read data
-        let mut data = vec![0; uncompressed_data_length as usize];
+        let mut data = vec![0; compressed_data_length as usize];
         reader.read_exact(&mut data)?;
 
         Ok(SocketPacket::new(
