@@ -150,7 +150,7 @@ impl NetworkPacket {
         reader.read_exact(&mut compressed_data)?;
 		
 		// decompress the data 
-		let mut data = vec![0; uncompressed_data_length as usize];
+		let mut data = vec![0; uncompressed_data_length];
 		let mut gz_decoder = GzDecoder::new(&compressed_data);
 		gz_decoder.read_exact(&mut data)?;
 		
