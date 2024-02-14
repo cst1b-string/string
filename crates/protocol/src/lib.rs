@@ -58,6 +58,9 @@ pub mod prost {
 /// A type alias for [packet::v1::Packet], useful for disambiguating packet formants between network layers.
 pub type ProtocolPacket = packet::v1::Packet;
 
+/// A type alias for [packet::v1::packet::PacketType], useful for disambiguating packet formants between network layers.
+pub type ProtocolPacketType = packet::v1::packet::PacketType;
+
 /// Attempt to decode a packet from the given buffer.
 pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, DecodeError>
 where

@@ -1,11 +1,11 @@
 use clap::Parser;
 use comm::{peer::PeerState, Socket};
+use protocol::{messages, packet, ProtocolPacket};
+use std::io;
 use std::{net::SocketAddr, time::Duration};
+use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
-use protocol::{ProtocolPacket, messages, packet};
-use std::io;
-use tokio::sync::mpsc;
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -19,7 +19,7 @@ struct Args {
     #[clap(long)]
     initiate: bool,
     #[clap(long)]
-    username: String
+    username: String,
 }
 
 #[tokio::main]
@@ -28,7 +28,7 @@ async fn main() {
         bind_port,
         initiate,
         peer_addrs,
-        username
+        username,
     } = Args::parse();
 
     // initialise tracing
@@ -94,19 +94,16 @@ async fn main() {
     info!("[+] All connections succeeded!");
     info!("[+] Chat log follows below, enter any input to send:");
 
-
     tokio::task::spawn(async move {
         loop {
             for (_i, app_inbound_rx) in receivers.iter_mut().enumerate() {
                 match app_inbound_rx.try_recv() {
-                    Ok(recv) => {
-                        match recv.packet {
-                            Some(packet::v1::packet::Packet::PktMessage(m)) => {
-                                info!("<{0}>: {1}", m.username, m.content);
-                            },
-                            Some(_) => {},
-                            None => {}
+                    Ok(recv) => match recv.packet {
+                        Some(packet::v1::packet::Packet::PktMessage(m)) => {
+                            info!("<{0}>: {1}", m.username, m.content);
                         }
+                        Some(_) => {}
+                        None => {}
                     },
                     Err(_) => {}
                 };
@@ -115,8 +112,8 @@ async fn main() {
         }
     });
     loop {
-         let mut input = String::new();
-         let mut pkt = ProtocolPacket::default();
+        let mut input = String::new();
+        let mut pkt = ProtocolPacket::default();
 
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
@@ -131,19 +128,18 @@ async fn main() {
                     channel_id: "test-channel".to_string(),
                     username: username.to_string(),
                     content: trimmed.to_string(),
-                    attachments: vec![]
+                    attachments: vec![],
                 };
                 if gossip {
                     let mut subpkt = ProtocolPacket::default();
                     subpkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
-                    pkt.packet = Some(packet::v1::packet::Packet::PktGossip(
-                        Box::new(packet::v1::Gossip {
+                    pkt.packet = Some(packet::v1::packet::Packet::PktGossip(Box::new(
+                        packet::v1::Gossip {
                             peer_name: username.to_string(),
-                            content: Some(Box::new(subpkt))
-                        })
-                    ));
-                }
-                else {
+                            content: Some(Box::new(subpkt)),
+                        },
+                    )));
+                } else {
                     pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
                 }
                 for app_outbound_tx in &senders {

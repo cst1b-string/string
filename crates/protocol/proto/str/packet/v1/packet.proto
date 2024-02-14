@@ -18,7 +18,7 @@ message Gossip {
 message FirstPacket { }
 
 message Packet {
-	oneof packet {
+	oneof packet_type {
 //		ExamplePacket example = 1;
 		str.messages.v1.Message pkt_message = 1;
 		str.crypto.v1.Crypto pkt_crypto = 2;
