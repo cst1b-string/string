@@ -1,28 +1,15 @@
-import { ExistingChat } from '@/components/existingChat';
-import { NewChat } from '../components/newChat';
-import fs from 'fs';
+import ChatSidebar from "@/components/chatSidebar";
 
-const folderPath = './src/app/logs';
-
-function getChatNames(folderPath: string): string[] {
-	try {
-		const files = fs.readdirSync(folderPath);
-		const chatNames = files.map((file) => file.replace('.txt', ''));
-		return chatNames;
-	} catch (error) {
-		console.error('Error reading folder:', error);
-		return [];
-	}
-}
-
-export default function Home() {
-	const chatNames = getChatNames(folderPath);
-	return (
-		<div>
-			<NewChat />
-			{chatNames.map((chatName, index) => (
-				<ExistingChat key={index} chatName={chatName} />
-			))}
+export default function Home () {
+  return (
+	<div className="grid grid-cols-3 divide-x divide-gray-400 h-[calc(100vh-80px)]">
+		<div className="">
+			<ChatSidebar />
 		</div>
-	);
+
+		<div className="col-span-2 text-white font-bold "> 
+			Chat window will go here
+		</div>
+	</div>
+  );
 }
