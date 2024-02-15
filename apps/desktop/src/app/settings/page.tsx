@@ -22,30 +22,32 @@ export default function Home() {
 		lightModeText = "Light Mode"
 	}
 	return (
-		<div className="py-5 px-4">
-			<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md size-sm">
+		<div className="flex justify-center">
+			<div className="py-5 w-1/3 space-y-1">
+				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
 
-				<button onClick={() => lightModeComposite.setLightMode(true)}>
-					<h1> {lightModeText} </h1>
-				</button>
+					<button onClick={() => lightModeComposite.setLightMode(true)}>
+						<h1> {lightModeText} </h1>
+					</button>
+
+				</div>
+
+				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+
+					<button onClick={() => false}>
+						<h1> Setting 2 </h1>
+					</button>
+				</div>
+
+				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+
+					<button onClick={() => false}>
+						<h1> Setting 3 </h1>
+					</button>
+
+				</div>
 
 			</div>
-
-			<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
-
-				<button onClick={() => false}>
-					<h1> Setting 2 </h1>
-				</button>
-			</div>
-
-			<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
-
-				<button onClick={() => false}>
-					<h1> Setting 3 </h1>
-				</button>
-
-			</div>
-
 		</div>
 	);
 }
