@@ -1,5 +1,5 @@
 import { ChatButton } from '@/components/chatButton';
-import fs from 'fs';
+//import fs from 'fs'; //use client issue
 
 const folderPath = './src/app/logs';
 
