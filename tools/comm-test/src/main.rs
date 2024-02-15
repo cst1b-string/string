@@ -1,6 +1,6 @@
 use clap::Parser;
 use comm::{peer::PeerState, Socket};
-use protocol::{messages, packet, ProtocolPacket};
+use protocol::{messages, packet, ProtocolPacket, ProtocolPacketType};
 use std::io;
 use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc;
@@ -98,8 +98,8 @@ async fn main() {
         loop {
             for (_i, app_inbound_rx) in receivers.iter_mut().enumerate() {
                 match app_inbound_rx.try_recv() {
-                    Ok(recv) => match recv.packet {
-                        Some(packet::v1::packet::Packet::PktMessage(m)) => {
+                    Ok(recv) => match recv.packet_type {
+                        Some(ProtocolPacketType::PktMessage(m)) => {
                             info!("<{0}>: {1}", m.username, m.content);
                         }
                         Some(_) => {}
@@ -132,15 +132,15 @@ async fn main() {
                 };
                 if gossip {
                     let mut subpkt = ProtocolPacket::default();
-                    subpkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
-                    pkt.packet = Some(packet::v1::packet::Packet::PktGossip(Box::new(
+                    subpkt.packet_type = Some(ProtocolPacketType::PktMessage(message));
+                    pkt.packet_type = Some(ProtocolPacketType::PktGossip(Box::new(
                         packet::v1::Gossip {
                             peer_name: username.to_string(),
                             content: Some(Box::new(subpkt)),
                         },
                     )));
                 } else {
-                    pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
+                    pkt.packet_type = Some(ProtocolPacketType::PktMessage(message));
                 }
                 for app_outbound_tx in &senders {
                     let _ = app_outbound_tx.send(pkt.clone()).await;
