@@ -1,21 +1,11 @@
 import { ChatButton } from '@/components/chatButton';
-//import fs from 'fs'; //use client issue
 
-const folderPath = './src/app/logs';
-
-function getChatNames(folderPath: string): string[] {
-	try {
-		const files = fs.readdirSync(folderPath);
-		const chatNames = files.map((file) => file.replace('.txt', ''));
-		return chatNames;
-	} catch (error) {
-		console.error('Error reading folder:', error);
-		return [];
-	}
+function getChatNames(): string[] {
+	return ['David', 'Group Chat!'];
 }
 
 export default function ChatSidebar() {
-	const chatNames = getChatNames(folderPath);
+	const chatNames = getChatNames();
 	return (
 		<div>
 			<ChatButton chatName='New Chat +' />
