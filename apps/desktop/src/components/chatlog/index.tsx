@@ -6,9 +6,9 @@ import React from "react";
 
 import "./chat.css";
 
-const sentences = new Array(1000).fill(true).map(() => "The same sentence over and over again."); // faker.lorem.sentence({ min: 50, max: 100 }));
+const sentences = new Array(1000).fill(true).map(() => faker.lorem.sentence({ min: 10, max: 30 })); // "The same sentence over and over again."); //
 
-export default function Home() {
+export default function ChatLog() {
 	const parentRef = React.useRef<HTMLDivElement>(null);
 
 	const count = sentences.length;
@@ -30,9 +30,9 @@ export default function Home() {
 			className="List"
 			style={{
 				position: "relative",
-				left: "7.5%",
-				height: 800,
-				width: "85%",
+				//left: "2.5%",
+				height: "90%",
+				//width: "85%",
 				overflowY: "auto",
 				contain: "strict",
 			}}
@@ -56,13 +56,14 @@ export default function Home() {
 					{items.map((virtualRow) => (
 						<div
 							key={virtualRow.key}
+							style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
 							data-index={virtualRow.index}
 							ref={virtualizer.measureElement}
 							className={virtualRow.index % 2 ? "ListItemOdd" : "ListItemEven"}
 						>
-							<div style={{ padding: "10px 0" }}>
+							<div style={{ padding: "10px 0", position: "relative", left: "2.5%", width: "85%" }}>
 								<div className="user">User {virtualRow.index % 2 ? "1" : "2"}: </div>
-								{sentences[virtualRow.index]}
+								<div className="chat">{sentences[virtualRow.index]} </div>
 							</div>
 						</div>
 					))}
