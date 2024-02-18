@@ -1,5 +1,5 @@
 import { Logo } from './logo';
-import { SignInButton } from './sign-in';
+import { SignInButton } from './sign-in-button';
 import { SettingsButton } from './settings-button';
 
 function LoginOrSettingsButton( { loggedIn } : { loggedIn: boolean }) {
