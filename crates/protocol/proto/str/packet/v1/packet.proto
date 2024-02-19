@@ -2,27 +2,12 @@ syntax = "proto3";
 
 package str.packet.v1;
 
+import "str/gossip/v1/gossip.proto";
 import "str/messages/v1/messages.proto";
-import "str/crypto/v1/crypto.proto";
-
-message ExamplePacket {
-	string example = 1;
-}
-
-message Gossip {
-	string peer_name = 1;
-	Packet content = 2;
-}
-
-// The first packet from Alice to Bob to kickstart DR
-message FirstPacket { }
 
 message Packet {
 	oneof packet_type {
-//		ExamplePacket example = 1;
-		str.messages.v1.Message pkt_message = 1;
-		str.crypto.v1.Crypto pkt_crypto = 2;
-		FirstPacket pkt_first = 3;
-		Gossip pkt_gossip = 4;
+		str.gossip.v1.Gossip pkt_gossip = 1;
+		str.messages.v1.Message pkt_message = 2;
 	}
 }

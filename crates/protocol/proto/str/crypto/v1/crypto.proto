@@ -6,7 +6,33 @@ syntax = "proto3";
 
 package str.crypto.v1;
 
-message Crypto {
-	bytes dh_pubkey = 1; // DH pub key to establish shared_secret
+message SignedPacketInternal {
+	// Source node of gossip
+	string source = 1;
+	// Intended destination node of gossip
+	string destination = 2;
+	oneof message_type {
+		DRKeyExchange key_exchange = 3;
+		CertExchange cert_exchange = 4;
+		EncryptedPacket encrypted_packet = 5;
+	}
+}
+message SignedPacket {
+	bytes signature = 1;
+
+	// Separate message; signature should verify signed_data when its encoded in bytes
+	SignedPacketInternal signed_data = 2;
+}
+
+message DRKeyExchange {
+	bytes dh_pubkey = 1;    // DH pub key to establish shared_secret
 	bytes dr_pubkey = 2;    // DR pub key too
+}
+
+message CertExchange {
+	bytes cert_pubkey = 1;  // Public key of certificate
+}
+
+message EncryptedPacket {
+	bytes content = 2;      // DR encrypted encoded ProtocolPacket in bytes
 }

@@ -1,6 +1,6 @@
 use clap::Parser;
 use comm::{peer::PeerState, Socket};
-use protocol::{messages, packet, ProtocolPacket, ProtocolPacketType};
+use protocol::{messages, ProtocolPacket, ProtocolPacketType};
 use std::io;
 use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc;
@@ -68,7 +68,7 @@ async fn main() {
     let mut tick: u16 = 0;
 
     while tick < 5 * 60 * 2 && ready_peers.len() != peer_addrs.len() {
-        for i in 0..peer_addrs.len() {
+        for (i, _) in peer_addrs.iter().enumerate() {
             if !ready_peers.contains(&i) {
                 match socket.get_peer_state(peer_addrs[i]).await {
                     None => {}
@@ -92,20 +92,21 @@ async fn main() {
     }
 
     info!("[+] All connections succeeded!");
-    info!("[+] Chat log follows below, enter any input to send:");
+    info!("[+] Chat log follows below:");
+    info!("[+] Use /dr <username> to start a chat with user");
+    info!("[+] Then use /msg <username> <message> to send a message");
 
     tokio::task::spawn(async move {
         loop {
-            for (_i, app_inbound_rx) in receivers.iter_mut().enumerate() {
-                match app_inbound_rx.try_recv() {
-                    Ok(recv) => match recv.packet_type {
+            for app_inbound_rx in receivers.iter_mut() {
+                if let Ok(recv) = app_inbound_rx.try_recv() {
+                    match recv.packet_type {
                         Some(ProtocolPacketType::PktMessage(m)) => {
                             info!("<{0}>: {1}", m.username, m.content);
                         }
                         Some(_) => {}
                         None => {}
-                    },
-                    Err(_) => {}
+                    }
                 };
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -113,40 +114,36 @@ async fn main() {
     });
     loop {
         let mut input = String::new();
-        let mut pkt = ProtocolPacket::default();
 
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => {
-                let mut trimmed = input.trim();
-                let mut gossip: bool = false;
-                if trimmed.starts_with("G ") {
-                    trimmed = &trimmed[2..];
-                    gossip = true;
-                }
-                let message = messages::v1::Message {
-                    id: "test-id".to_string(),
-                    channel_id: "test-channel".to_string(),
-                    username: username.to_string(),
-                    content: trimmed.to_string(),
-                    attachments: vec![],
-                };
-                if gossip {
-                    let mut subpkt = ProtocolPacket::default();
-                    subpkt.packet_type = Some(ProtocolPacketType::PktMessage(message));
-                    pkt.packet_type = Some(ProtocolPacketType::PktGossip(Box::new(
-                        packet::v1::Gossip {
-                            peer_name: username.to_string(),
-                            content: Some(Box::new(subpkt)),
-                        },
-                    )));
-                } else {
-                    pkt.packet_type = Some(ProtocolPacketType::PktMessage(message));
-                }
-                for app_outbound_tx in &senders {
-                    let _ = app_outbound_tx.send(pkt.clone()).await;
+        if (io::stdin().read_line(&mut input)).is_ok() {
+            let mut trimmed = input.trim();
+            if trimmed.starts_with('/') {
+                trimmed = &trimmed[1..];
+                if let Some((prefix, rest)) = trimmed.split_once(' ') {
+                    if prefix == "dr" {
+                        let _ = socket.start_dr(rest.to_string()).await;
+                    } else if prefix == "msg" {
+                        if let Some((destination, message)) = rest.split_once(' ') {
+                            let message = messages::v1::Message {
+                                id: "test-id".to_string(),
+                                channel_id: "test-channel".to_string(),
+                                username: username.to_string(),
+                                content: message.to_string(),
+                                attachments: vec![],
+                            };
+                            let packet = ProtocolPacket {
+                                packet_type: Some(ProtocolPacketType::PktMessage(message)),
+                            };
+                            let _ = Socket::send_gossip_encrypted(
+                                packet,
+                                socket.peers.clone(),
+                                destination.to_string(),
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
-            Err(_) => {}
         }
     }
 }
