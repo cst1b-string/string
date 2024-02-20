@@ -33,6 +33,9 @@ pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 
+/// Number of peers to send gossip to
+const GOSSIP_COUNT: usize = 3;
+
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
 pub struct Socket {
@@ -185,15 +188,13 @@ impl Socket {
         Ok(())
     }
 
-    /// Selects at most 3 peers randomly from list of peers
+    /// Selects at most 3 peers randomly from list of peers - should
+    /// probably employ round robin here.
     pub async fn select_gossip_peers(
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+        &self,
         skip: Option<SocketAddr>,
     ) -> Result<Vec<SocketAddr>, SocketError> {
-        // Number of peers to send gossip to
-        const GOSSIP_CNT: usize = 3;
-
-        let mut peer_addrs: Vec<SocketAddr> = { peers.read().await.keys().cloned().collect() };
+        let mut peer_addrs: Vec<SocketAddr> = { self.peers.read().await.keys().cloned().collect() };
 
         if peer_addrs.is_empty() {
             return Err(SocketError::NoPeer);
@@ -203,7 +204,7 @@ impl Socket {
             peer_addrs.retain(|&x| x != skip_addr);
         }
 
-        let gossip_cnt = cmp::min(peer_addrs.len(), GOSSIP_CNT);
+        let gossip_cnt = cmp::min(peer_addrs.len(), GOSSIP_COUNT);
         let gossip_targets: Vec<SocketAddr> = peer_addrs
             .choose_multiple(&mut OsRng, gossip_cnt)
             .cloned()
@@ -214,15 +215,15 @@ impl Socket {
     /// Sends non-encrypted message to a random group of peers
     /// Use this to send key exchange messages
     pub async fn send_gossip(
+        &self,
         message: MessageType,
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         destination: String,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), None).await?;
+        let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
             {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
+                let mut peers = self.peers.write().await;
+                let target_peer = peers.get_mut(&target);
                 if (target_peer
                     .expect("No such peer")
                     .send_gossip_single(message.clone(), destination.clone())
@@ -238,11 +239,12 @@ impl Socket {
     /// Use this to send a ProtocolPacket containing a PktMessage,
     /// which contains the message data
     pub async fn send_gossip_encrypted(
+        &self,
         packet: ProtocolPacket,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         destination: String,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), None).await?;
+        let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
             {
                 let mut peers_write = peers.write().await;
@@ -261,14 +263,14 @@ impl Socket {
     /// Forwards a received gossip packet as is to a random group of peers
     /// Internal use only for forwarding gossip packets not intended for us
     pub async fn forward_gossip(
+        &self,
         packet: ProtocolPacket,
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         skip: SocketAddr,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), Some(skip)).await?;
+        let gossip_targets = self.select_gossip_peers(Some(skip)).await?;
         for target in gossip_targets {
             {
-                let mut peers_write = peers.write().await;
+                let mut peers_write = self.peers.write().await;
                 let target_peer = peers_write.get_mut(&target);
                 if (target_peer
                     .expect("No such peer")
@@ -293,12 +295,8 @@ impl Socket {
                 let kex_msg = dr.generate_kex_message();
                 entry.insert(dr);
                 drop(crypto);
-                Socket::send_gossip(
-                    MessageType::KeyExchange(kex_msg),
-                    self.peers.clone(),
-                    destination,
-                )
-                .await?;
+                self.send_gossip(MessageType::KeyExchange(kex_msg), destination)
+                    .await?;
                 Ok(())
             }
         }

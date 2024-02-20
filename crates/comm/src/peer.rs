@@ -2,9 +2,11 @@
 
 use crate::{
     crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
+    maybe_break,
     socket::{
         Socket, SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
     },
+    try_break, try_continue,
 };
 use protocol::{
     crypto, gossip, packet, try_decode_packet, try_encode_packet, try_verify_packet_sig,
@@ -17,16 +19,6 @@ use tokio::sync::{
     RwLock,
 };
 use tracing::{debug, span, trace, warn, Level};
-
-/// A convenient macro for breaking out of a loop if an error occurs.
-macro_rules! try_break {
-    ($e:expr) => {
-        match $e {
-            Ok(e) => e,
-            Err(_) => break,
-        }
-    };
-}
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -325,10 +317,7 @@ fn start_peer_sender_worker(
             }
             // receive packet from queue
             trace!("receive packet from queue");
-            let packet: ProtocolPacket = match app_outbound_rx.recv().await {
-                Some(packet) => packet,
-                None => break,
-            };
+            let packet: ProtocolPacket = maybe_break!(app_outbound_rx.recv().await);
 
             // encode packet
             trace!("encode packet: {:?}", packet);
@@ -345,10 +334,7 @@ fn start_peer_sender_worker(
                 .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
                 .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
             {
-                match net_outbound_tx.send(net_packet).await {
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
+                try_break!(net_outbound_tx.send(net_packet).await);
             }
         }
     });
@@ -371,11 +357,7 @@ fn start_peer_receiver_worker(
 
         loop {
             trace!("start_peer_receiver_worker loop");
-
-            let packet: SocketPacket = match net_inbound_rx.recv().await {
-                Some(packet) => packet,
-                None => break,
-            };
+            let packet: SocketPacket = maybe_break!(net_inbound_rx.recv().await);
 
             // read current state
             let current_state = {
@@ -488,56 +470,52 @@ fn start_peer_receiver_worker(
                         };
 
                         if current_state == PeerState::Established {
-                            let original = packet.clone();
-                            match packet.packet_type {
-                                Some(ProtocolPacketType::PktGossip(gossip)) => {
-                                    match gossip.packet {
-                                        Some(signed_packet) => {
-                                            let mut peers_obj = peers.write().await;
-                                            let peer = match peers_obj.get_mut(&remote_addr) {
-                                                Some(p) => p,
-                                                None => {
-                                                    continue;
-                                                }
-                                            };
-                                            // Verify signature on packet
-                                            let signed_packet =
-                                                match try_verify_packet_sig(&signed_packet) {
-                                                    Ok(s) => s,
-                                                    Err(_) => {
-                                                        // Error with signature
-                                                        continue;
-                                                    }
-                                                };
+                            // clear queue - return early to avoid lots of nesting
+                            debug!("clear packet queue");
+                            packet_queue.clear();
+                            continue;
+                        }
 
-                                            // Dispatch gossip to respective code if its for us...
-                                            let forward = peer
-                                                .dispatch_gossip(
-                                                    signed_packet.clone(),
-                                                    app_inbound_tx.clone(),
-                                                )
-                                                .await
-                                                .unwrap();
-                                            // ..., otherwise, forward it on to our peers
-                                            if forward {
-                                                drop(peers_obj);
-                                                let _ = Socket::forward_gossip(
-                                                    original,
-                                                    peers.clone(),
-                                                    remote_addr,
-                                                )
-                                                .await;
-                                            }
-                                        }
+                        match packet.packet_type {
+                            Some(ProtocolPacketType::PktGossip(ref gossip)) => {
+                                // check if we are missing a signed ppacket
+                                if let None = gossip.packet {
+                                    continue;
+                                }
+
+                                let signed_packet = gossip.packet.as_ref().unwrap();
+
+                                let forward = {
+                                    let mut peers = peers.write().await;
+                                    let peer = match peers.get_mut(&remote_addr) {
+                                        Some(p) => p,
                                         None => {
-                                            // Missing signed packet
                                             continue;
                                         }
-                                    }
+                                    };
+
+                                    // Verify signature on packet
+                                    let signed_packet =
+                                        try_continue!(try_verify_packet_sig(&signed_packet));
+
+                                    // Dispatch gossip to respective code if its for us...
+                                    peer.dispatch_gossip(
+                                        signed_packet.clone(),
+                                        app_inbound_tx.clone(),
+                                    )
+                                    .await
+                                    .unwrap()
+                                };
+                                // ..., otherwise, forward it on to our peers
+                                if forward {
+                                    drop(peers);
+                                    let _ =
+                                        Socket::forward_gossip(packet, peers.clone(), remote_addr)
+                                            .await;
                                 }
-                                Some(_) => {}
-                                None => {}
                             }
+                            Some(_) => {}
+                            None => {}
                         }
 
                         // clear queue
