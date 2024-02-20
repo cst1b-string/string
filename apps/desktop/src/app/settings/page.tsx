@@ -38,6 +38,10 @@ export default function Home() {
 
 					<h1 className="px-1"> Username: </h1>
 					<input className="bg-[#113355] px-1" defaultValue={Username}/>
+					
+					<button className="px-1 bg-black rounded-md" onClick={() => false}>
+						<h1> Submit </h1>
+					</button>
 
 				</div>
 
@@ -45,6 +49,10 @@ export default function Home() {
 
 					<h1 className="px-1"> User Bio: </h1>
 					<textarea className="bg-[#113355] px-1 resize-none" rows={5} defaultValue={Bio}/>
+
+					<button className="px-1 py-5 bg-black rounded-md" onClick={() => false}>
+						<h1> Submit </h1>
+					</button>
 
 				</div>
 
