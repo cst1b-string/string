@@ -10,17 +10,18 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use protocol::{prost::DecodeError, try_decode_packet, MessageType, ProtocolPacket};
-use rand::{rngs::OsRng, seq::SliceRandom};
+use rand::{rngs::OsRng, seq::IteratorRandom};
 use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
-use tracing::{debug, span, trace};
+use tracing::{debug, error, span, trace};
 
 use crate::{
     crypto::{Crypto, DoubleRatchet},
     peer::{Peer, PeerError, PeerState},
+    try_continue,
 };
 
 /// The magic number used to identify packets sent over the network.
@@ -194,22 +195,22 @@ impl Socket {
         &self,
         skip: Option<SocketAddr>,
     ) -> Result<Vec<SocketAddr>, SocketError> {
-        let mut peer_addrs: Vec<SocketAddr> = { self.peers.read().await.keys().cloned().collect() };
+        let targets: Vec<_> = self
+            .peers
+            .read()
+            .await
+            .keys()
+            // skip if included
+            .filter(|addr| skip.map(|skip_addr| skip_addr != **addr).unwrap_or(true))
+            .cloned()
+            .choose_multiple(&mut OsRng, GOSSIP_COUNT);
 
-        if peer_addrs.is_empty() {
+        // we have no targets!
+        if targets.is_empty() {
             return Err(SocketError::NoPeer);
         }
 
-        if let Some(skip_addr) = skip {
-            peer_addrs.retain(|&x| x != skip_addr);
-        }
-
-        let gossip_cnt = cmp::min(peer_addrs.len(), GOSSIP_COUNT);
-        let gossip_targets: Vec<SocketAddr> = peer_addrs
-            .choose_multiple(&mut OsRng, gossip_cnt)
-            .cloned()
-            .collect();
-        Ok(gossip_targets)
+        Ok(targets)
     }
 
     /// Sends non-encrypted message to a random group of peers
@@ -316,14 +317,11 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             }
 
             // receive packet
-            let (size, addr) = match socket.recv_from(&mut buf).await {
-                Ok((size, addr)) => (size, addr),
-                Err(e) => {
-                    eprintln!("Error reading from network: {:?}", e);
-                    continue;
-                }
-            };
-
+            let (size, addr) = try_continue!(
+                socket.recv_from(&mut buf).await,
+                "Error reading from network: {:?}",
+                err
+            );
             // see if we know this peer
             let mut peers = peers.write().await;
             let peer = match peers.get_mut(&addr) {

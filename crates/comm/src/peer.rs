@@ -12,13 +12,20 @@ use protocol::{
     crypto, gossip, packet, try_decode_packet, try_encode_packet, try_verify_packet_sig,
     MessageType, ProtocolPacket, ProtocolPacketType,
 };
-use std::{cmp::Reverse, collections::HashMap, fmt, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+    fmt,
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
     RwLock,
 };
-use tracing::{debug, span, trace, warn, Level};
+use tracing::{debug, error, span, trace, warn, Level};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -55,7 +62,10 @@ pub struct Peer {
     pub state: Arc<RwLock<PeerState>>,
     /// This object will handle the key exchange and encryption needs
     pub crypto: Arc<RwLock<Crypto>>,
+    /// A reference to the socket's peers.
     pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    /// The username of this peer.
+    /// TODO: switch to a slightly more rigorous notion of identity.
     pub username: String,
 }
 
@@ -125,13 +135,7 @@ impl Peer {
         });
 
         span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
-            start_peer_sender_worker(
-                state.clone(),
-                net_outbound_tx.clone(),
-                app_inbound_tx.clone(),
-                app_outbound_rx,
-                remote_addr,
-            )
+            start_peer_sender_worker(state.clone(), net_outbound_tx.clone(), app_outbound_rx)
         });
 
         (
@@ -193,15 +197,17 @@ impl Peer {
         destination: String,
     ) -> Result<(), PeerError> {
         let bytes = try_encode_packet(&packet).map_err(PeerError::EncodeFail)?;
-        let mut crypto_obj = self.crypto.write().await;
-        let ratchet = crypto_obj
-            .ratchets
-            .get_mut(&destination)
-            .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-        let enc = ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?;
-        drop(crypto_obj);
+        // encrypt message contents
+        let content = {
+            let mut crypto = self.crypto.write().await;
+            let ratchet = crypto
+                .ratchets
+                .get_mut(&destination)
+                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+            ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+        };
         self.send_gossip_single(
-            MessageType::EncryptedPacket(crypto::v1::EncryptedPacket { content: enc }),
+            MessageType::EncryptedPacket(crypto::v1::EncryptedPacket { content }),
             destination,
         )
         .await?;
@@ -252,18 +258,20 @@ impl Peer {
                         DoubleRatchet::AlmostInitialized { .. }
                         | DoubleRatchet::Initialized { .. } => {
                             // Should not reach here
+                            unreachable!()
                         }
                     }
                 }
                 Some(MessageType::CertExchange(_cert)) => todo!(),
                 Some(MessageType::EncryptedPacket(enc)) => {
-                    let mut crypto_obj = self.crypto.write().await;
-                    let ratchet = crypto_obj
-                        .ratchets
-                        .get_mut(&source)
-                        .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-                    let bytes = ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?;
-                    drop(crypto_obj);
+                    let bytes = {
+                        let mut crypto = self.crypto.write().await;
+                        let ratchet = crypto
+                            .ratchets
+                            .get_mut(&source)
+                            .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                        ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                    };
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
                 }
@@ -281,9 +289,7 @@ impl Peer {
 fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
-    _app_inbound_tx: mpsc::Sender<ProtocolPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
-    _remote_addr: SocketAddr,
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
@@ -310,24 +316,25 @@ fn start_peer_sender_worker(
                 );
                 syns_sent += 1;
             }
+
+            // if we're not established, go around again
             if current_state != PeerState::Established {
                 debug!("peer is not established, sleeping for 500ms");
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 continue;
             }
+
             // receive packet from queue
             trace!("receive packet from queue");
             let packet: ProtocolPacket = maybe_break!(app_outbound_rx.recv().await);
 
             // encode packet
             trace!("encode packet: {:?}", packet);
-            let buf = match try_encode_packet(&packet) {
-                Ok(buf) => buf,
-                Err(e) => {
-                    eprintln!("Failed to encode packet: {:?}", e);
-                    continue;
-                }
-            };
+            let buf = try_continue!(
+                try_encode_packet(&packet),
+                "Failed to encode packet: {:?}",
+                &packet
+            );
 
             // split packet into network packets and send
             for net_packet in buf
@@ -353,10 +360,11 @@ fn start_peer_receiver_worker(
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
         // packets that make up a single protocol message
-        let mut packet_queue = std::collections::BinaryHeap::new();
+        let mut packet_queue = BinaryHeap::new();
 
         loop {
             trace!("start_peer_receiver_worker loop");
+
             let packet: SocketPacket = maybe_break!(net_inbound_rx.recv().await);
 
             // read current state

@@ -9,17 +9,12 @@ macro_rules! try_break {
             Err(_) => break,
         }
     };
-}
-
-/// A convenient macro for breaking out of a loop if an error occurs, as well
-/// as printing a debug message.
-#[macro_export]
-macro_rules! try_break_debug {
-    ($e:expr, $msg:literal) => {
+    ($e:expr,  $($arg:tt)*) => {
         match $e {
             Ok(e) => e,
-            Err(_) => {
-                debug!($msg)
+            Err(err) => {
+                error!($($arg)*);
+                break;
             }
         }
     };
@@ -34,17 +29,11 @@ macro_rules! try_continue {
             Err(_) => continue,
         }
     };
-}
-
-/// A convenient macro for skipping this loop iteration if an error occurs, as well
-/// as printing a debug message.
-#[macro_export]
-macro_rules! try_continue_debug {
-    ($e:expr, $msg:literal) => {
+    ($e:expr, $($arg:tt)*) => {
         match $e {
             Ok(e) => e,
-            Err(_) => {
-                debug!($msg);
+            Err(err) => {
+                error!($($arg)*);
                 continue;
             }
         }
@@ -60,17 +49,12 @@ macro_rules! maybe_break {
             None => break,
         }
     };
-}
-
-/// A convenient macro for breaking out of a loop if a value if None, as well
-/// as printing a debug message.
-#[macro_export]
-macro_rules! maybe_break_debug {
-    ($e:expr, $msg:literal) => {
+    ($e:expr, $($arg:tt)*) => {
         match $e {
             Some(e) => e,
             None => {
-                debug!($msg)
+                error!($($arg)*);
+                break;
             }
         }
     };
@@ -85,18 +69,12 @@ macro_rules! maybe_continue {
             None => continue,
         }
     };
-}
-
-/// A convenient macro for skipping this loop iteration if a value if None, as well
-/// as printing a debug message.
-#[macro_export]
-macro_rules! maybe_continue_debug {
-    ($e:expr, $msg:literal) => {
+    ($e:expr, $($arg:tt)*) => {
         match $e {
             Some(e) => e,
             None => {
-                debug!($msg);
-                continue;
+                error!($($arg)*);
+                break;
             }
         }
     };
