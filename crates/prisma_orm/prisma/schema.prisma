@@ -1,0 +1,78 @@
+datasource db {
+    provider = "postgresql"
+    url      = env("CHAT_DB_URL")
+    schemas  = ["channel", "chat"]
+}
+
+generator client {
+    provider        = "cargo prisma"
+    output          = "../src/prisma.rs"
+    previewFeatures = ["multiSchema"]
+}
+
+model Channel {
+    key       Bytes             @id
+    endpoints ChannelEndpoint[]
+
+    @@schema("channel")
+}
+
+model ChannelEndpoint {
+    id         String   @id @default(uuid()) @db.Uuid
+    channel    Channel  @relation(fields: [channelKey], references: [key])
+    channelKey Bytes
+    endpoint   String   @db.Inet
+    lastUpdate DateTime
+
+    @@schema("channel")
+}
+
+//------------------------------
+
+model Message {
+    id         Int               @id @default(autoincrement())
+    content    String
+    username   String
+    attachment MessageAttachment
+    timeSent   DateTime
+    Peer       Peer?             @relation(fields: [peerId], references: [id])
+    peerId     Int?
+
+    @@schema("chat")
+}
+
+enum MessageAttachment {
+    IMAGE
+    AUDIO
+    VIDEO
+
+    @@schema("chat")
+}
+
+model Peer {
+    id       Int       @id @default(autoincrement())
+    messages Message[]
+    User     User?     @relation(fields: [userId], references: [id])
+    userId   Int?
+
+    @@schema("chat")
+}
+
+model Settings {
+    id         Int     @id @default(autoincrement())
+    isDarkMode Boolean
+    User       User?
+
+    @@schema("chat")
+}
+
+model User {
+    id         Int      @id @default(autoincrement())
+    name       String
+    setting    Settings @relation(fields: [settingsId], references: [id])
+    peers      Peer[]
+    settingsId Int      @unique
+    // maybe put personal description / bio as well if we have time?
+
+    @@schema("chat")
+}

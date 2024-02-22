@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-string-comm = { path = "../../crates/comm" }
+comm = {package="string-comm", path = "../../crates/comm" }

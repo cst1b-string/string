@@ -67,6 +67,8 @@ pub enum PeerError {
     // Failed to send packet between threads.
     #[error("Failed to send packet to application")]
     ApplicationSendFail(#[from] SendError<ProtocolPacket>),
+	#[error("Peer doesn't exist")]
+	PeerNotFound
 }
 
 impl Peer {
