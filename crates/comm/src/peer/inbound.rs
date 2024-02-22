@@ -1,3 +1,6 @@
+//! This module contains the background task for receiving packets from the network and forwarding
+//! their decoded contents to the application.
+
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},

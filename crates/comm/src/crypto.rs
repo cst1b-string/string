@@ -101,6 +101,15 @@ impl fmt::Debug for Crypto {
 }
 
 impl DoubleRatchet {
+    /// Create a new ratchet, with the given initiator status.
+    pub fn new(is_initiator: bool) -> Self {
+        if is_initiator {
+            Self::new_initiator()
+        } else {
+            Self::new_responder()
+        }
+    }
+
     /// Create a new [DoubleRatchet] instance as an initiator.
     pub fn new_initiator() -> Self {
         Self::Initiator {

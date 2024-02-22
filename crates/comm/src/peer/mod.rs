@@ -1,4 +1,6 @@
-//! This module defines `Connection`, which manages the passing of data between two peers.
+//! This module defines [Peer], which manages the passing of data between the
+//! current device and a remote peer. It also contains the state of the connection
+//! and the channels used for passing data between the network tasks.
 
 mod ack;
 mod inbound;

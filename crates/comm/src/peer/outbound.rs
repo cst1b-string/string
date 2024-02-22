@@ -1,3 +1,6 @@
+//! This module contains the background task for sending packets to the network, taking packets from
+//! the application, encoding them as [SocketPacket]s, then sending them to the network.
+
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use protocol::{try_encode_packet, ProtocolPacket};
