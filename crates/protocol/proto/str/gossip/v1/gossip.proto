@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package str.gossip.v1;
+import "str/crypto/v1/crypto.proto";
+
+message Gossip {
+	str.crypto.v1.SignedPacket packet = 1;
+}

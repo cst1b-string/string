@@ -1,35 +1,35 @@
 //! This module defines `Connection`, which manages the passing of data between two peers.
 
-use std::{cmp::Reverse, collections::HashMap, net::SocketAddr, sync::Arc};
-
-use protocol::{packet, try_decode_packet, try_encode_packet, ProtocolPacket};
+use crate::{
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
+    maybe_break,
+    socket::{
+        Socket, SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
+    },
+    try_break, try_continue,
+};
+use protocol::{
+    crypto, gossip, try_decode_packet, try_encode_packet, try_verify_packet_sig, MessageType,
+    ProtocolPacket, ProtocolPacketType,
+};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+    fmt,
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 use thiserror::Error;
-use tokio::select;
 use tokio::sync::{
     mpsc::{self, error::SendError},
     Mutex, RwLock,
 };
-use tokio::time::{sleep, Duration, Instant};
-
-use tracing::{debug, span, trace, warn, Level};
-
-use crate::crypto::Crypto;
-use crate::socket::{
-    SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
-};
-
-/// A convenient macro for breaking out of a loop if an error occurs.
-macro_rules! try_break {
-    ($e:expr) => {
-        match $e {
-            Ok(e) => e,
-            Err(_) => break,
-        }
-    };
-}
+use tokio::{select, time::sleep};
+use tracing::{debug, error, span, trace, warn, Level};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
-const CHANNEL_SIZE: usize = 32;
+pub const CHANNEL_SIZE: usize = 32;
 
 /// The maximum size of an [ProtocolPacket] chunk before it needs to be split into multiple
 /// [SocketPacket]s.
@@ -40,9 +40,6 @@ const MAX_PROTOCOL_PACKET_CHUNK_SIZE: usize = UDP_MAX_DATAGRAM_SIZE - MIN_SOCKET
 pub enum PeerState {
     Init,
     Connect,
-    KeyInit,
-    KeyRecv,
-    AwaitFirst,
     Established,
     Dead,
 }
@@ -55,7 +52,6 @@ pub enum PeerState {
 /// - `app_inbound_rx` is used to receive [ProtocolPacket]s from the peer SM to the application.
 /// - `net_outbound_tx` is used to send [SocketPacket]s from the peer SM to the network.
 /// - `net_inbound_rx` is used to receive [SocketPacket]s from the network to the peer SM.
-#[derive(Debug)]
 pub struct Peer {
     /// The destination address.
     pub remote_addr: SocketAddr,
@@ -63,6 +59,7 @@ pub struct Peer {
     pub app_outbound_tx: mpsc::Sender<ProtocolPacket>,
     /// The inbound [SocketPacket] channel. This is used to receive packets from the network.
     pub net_inbound_tx: mpsc::Sender<SocketPacket>,
+    /// The current state of the peer.
     pub state: Arc<RwLock<PeerState>>,
     /// This object will handle the key exchange and encryption needs
     pub crypto: Arc<RwLock<Crypto>>,
@@ -74,6 +71,17 @@ pub struct Peer {
     /// There might be some redundancy here? i.e., we could just recreate store the fields to
     /// recreate the SocketPacket but probably shouldn't be too much of an issue for now
     pub packets_being_sent: Arc<RwLock<HashMap<(u32, u32), SocketPacket>>>,
+    /// A reference to the socket's peers.
+    pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    /// The username of this peer.
+    /// TODO: switch to a slightly more rigorous notion of identity.
+    pub username: String,
+}
+
+impl fmt::Debug for Peer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<Peer {0}>", self.remote_addr)
+    }
 }
 
 /// An enumeration of possible errors that can occur when working with peers.
@@ -85,6 +93,15 @@ pub enum PeerError {
     // Failed to send packet between threads.
     #[error("Failed to send packet to application")]
     ApplicationSendFail(#[from] SendError<ProtocolPacket>),
+    // Failed to decode decrypted packet
+    #[error("Failed to decode decrypted packet")]
+    DecodeFail(#[from] protocol::prost::DecodeError),
+    // Failed to encode packet for encryption
+    #[error("Failed to encode packet for encryption")]
+    EncodeFail(#[from] protocol::prost::EncodeError),
+    // Failure in double ratchet
+    #[error("Failure in double ratchet")]
+    DRFail(#[from] DoubleRatchetError),
 }
 
 impl Peer {
@@ -92,6 +109,9 @@ impl Peer {
     #[tracing::instrument(name = "peer", skip(initiate))]
     pub fn new(
         remote_addr: SocketAddr,
+        crypto: Arc<RwLock<Crypto>>,
+        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+        username: String,
         initiate: bool,
     ) -> (
         Self,
@@ -101,9 +121,6 @@ impl Peer {
         // channels for sending and receiving ProtocolPackets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
-
-        let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
-        let (peer_outbound_tx, peer_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
 
         // channel for sending and receiving SocketPackets to/from the network
         let (net_inbound_tx, net_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -122,10 +139,11 @@ impl Peer {
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
             start_peer_receiver_worker(
                 state.clone(),
-                peer_outbound_tx.clone(),
+                net_outbound_tx.clone(),
                 app_inbound_tx.clone(),
-                peer_inbound_rx,
-                crypto.clone(),
+                net_inbound_rx,
+                remote_addr,
+                peers.clone(),
                 packet_number.clone(),
                 packets_being_sent.clone(),
             )
@@ -134,33 +152,11 @@ impl Peer {
         span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
             start_peer_sender_worker(
                 state.clone(),
-                peer_outbound_tx.clone(),
-                app_inbound_tx.clone(),
+                net_outbound_tx.clone(),
                 app_outbound_rx,
                 crypto.clone(),
                 packet_number.clone(),
                 packets_being_sent.clone(),
-            )
-        });
-
-        span!(Level::TRACE, "crypto::receiver", %remote_addr).in_scope(|| {
-            start_crypto_receiver_worker(
-                state.clone(),
-                net_outbound_tx.clone(),
-                peer_inbound_tx.clone(),
-                net_inbound_rx,
-                peer_outbound_tx.clone(), // For sending first packet
-                crypto.clone(),
-            )
-        });
-
-        span!(Level::TRACE, "crypto::sender", %remote_addr).in_scope(|| {
-            start_crypto_sender_worker(
-                state.clone(),
-                net_outbound_tx.clone(),
-                peer_inbound_tx.clone(),
-                peer_outbound_rx,
-                crypto.clone(),
             )
         });
 
@@ -171,6 +167,8 @@ impl Peer {
                 net_inbound_tx,
                 state,
                 crypto,
+                peers,
+                username,
                 packet_number,
                 packets_being_sent,
             },
@@ -187,14 +185,135 @@ impl Peer {
             .map_err(PeerError::ApplicationSendFail)?;
         Ok(())
     }
+
+    /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
+    /// For distributing gossip check Socket class instead.
+    ///
+    /// TODO: Sign the gossip packet's contents with our private key
+    pub async fn send_gossip_single(
+        &mut self,
+        message: crypto::v1::signed_packet_internal::MessageType,
+        destination: String,
+    ) -> Result<(), PeerError> {
+        let internal = crypto::v1::SignedPacketInternal {
+            destination,
+            source: self.username.clone(),
+            message_type: Some(message),
+        };
+        // TODO: Sign internal
+        let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
+            packet: Some(crypto::v1::SignedPacket {
+                signature: vec![],
+                signed_data: Some(internal),
+            }),
+        });
+        let tosend = ProtocolPacket {
+            packet_type: Some(gossip),
+        };
+        self.send_packet(tosend.clone()).await?;
+        Ok(())
+    }
+
+    /// Similar to send_gossip_single, but packages a [ProtocolPacket]
+    /// as an [EncryptedPacket] in a [Gossip] Packet
+    pub async fn send_gossip_single_encrypted(
+        &mut self,
+        packet: ProtocolPacket,
+        destination: String,
+    ) -> Result<(), PeerError> {
+        let bytes = try_encode_packet(&packet).map_err(PeerError::EncodeFail)?;
+        // encrypt message contents
+        let content = {
+            let mut crypto = self.crypto.write().await;
+            let ratchet = crypto
+                .ratchets
+                .get_mut(&destination)
+                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+            ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+        };
+        self.send_gossip_single(
+            MessageType::EncryptedPacket(crypto::v1::EncryptedPacket { content }),
+            destination,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Dispatches gossip packet based on the following logic:
+    /// 1. If this packet is not intended for our node as destination, return true
+    ///    so the caller can forward it on
+    ///
+    /// Otherwise, check the message inside the gossip packet:
+    ///    2. if it's a [KeyExchange] try to establish the DR ratchet
+    ///    3. if it's an [EncryptedPacket] decrypt and forward it to the app
+
+    async fn dispatch_gossip(
+        &mut self,
+        signed_packet: crypto::v1::SignedPacket,
+        app_inbound_tx: mpsc::Sender<ProtocolPacket>,
+    ) -> Result<bool, PeerError> {
+        let signed_data = signed_packet.signed_data.unwrap();
+        let mut forward = false;
+        if signed_data.destination == self.username {
+            let source = signed_data.source;
+            match signed_data.message_type {
+                Some(MessageType::KeyExchange(dr)) => {
+                    let mut crypto_obj = self.crypto.write().await;
+                    let ratchet = crypto_obj
+                        .ratchets
+                        .entry(source.clone())
+                        .or_insert_with(DoubleRatchet::new_responder);
+                    match ratchet {
+                        DoubleRatchet::Responder { .. } => {
+                            if ratchet.handle_kex(dr).is_ok() {};
+                            let kex = ratchet.generate_kex_message();
+                            drop(crypto_obj);
+                            self.send_gossip_single(MessageType::KeyExchange(kex), source)
+                                .await?;
+                        }
+                        DoubleRatchet::Initiator { .. } => {
+                            if ratchet.handle_kex(dr).is_ok() {};
+                            drop(crypto_obj);
+                            self.send_gossip_single_encrypted(
+                                ProtocolPacket { packet_type: None },
+                                source,
+                            )
+                            .await?;
+                        }
+                        DoubleRatchet::AlmostInitialized { .. }
+                        | DoubleRatchet::Initialized { .. } => {
+                            // Should not reach here
+                            unreachable!()
+                        }
+                    }
+                }
+                Some(MessageType::CertExchange(_cert)) => todo!(),
+                Some(MessageType::EncryptedPacket(enc)) => {
+                    let bytes = {
+                        let mut crypto = self.crypto.write().await;
+                        let ratchet = crypto
+                            .ratchets
+                            .get_mut(&source)
+                            .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                        ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                    };
+                    let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
+                    app_inbound_tx.send(packet).await?;
+                }
+                None => {}
+            }
+        } else {
+            forward = true;
+        }
+        Ok(forward)
+    }
 }
 
 /// Starts the background task that handles sending packets to the network, taking
 /// packets from the application, encoding them as [NetworkPacket]s, before sending them to the network.
 fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
-    peer_outbound_tx: mpsc::Sender<SocketPacket>,
-    app_inbound_tx: mpsc::Sender<ProtocolPacket>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
     crypto: Arc<RwLock<Crypto>>,
     packet_number: Arc<Mutex<u32>>,
@@ -214,39 +333,30 @@ fn start_peer_sender_worker(
             // Only the receiving side will acknowledge
             if current_state == PeerState::Init || current_state == PeerState::Connect {
                 try_break!(
-                    peer_outbound_tx
-                        .send(SocketPacket::new(
-                            SocketPacketType::Syn,
-                            syns_sent,
-                            0,
-                            false,
-                            vec![],
-                        ))
+                    net_outbound_tx
+                        .send(
+                            SocketPacket::new(SocketPacketType::Syn, syns_sent, 0, vec![],)
+                                .expect("Failed to create syn packet")
+                        )
                         .await
                 );
                 syns_sent += 1;
             }
+
+            // if we're not established, go around again
             if current_state != PeerState::Established {
                 debug!("peer is not established, sleeping for 500ms");
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 continue;
             }
+
             // receive packet from queue
             trace!("receive packet from queue");
-            let packet: ProtocolPacket = match app_outbound_rx.recv().await {
-                Some(packet) => packet,
-                None => break,
-            };
+            let packet: ProtocolPacket = maybe_break!(app_outbound_rx.recv().await);
 
             // encode packet
             trace!("encode packet: {:?}", packet);
-            let buf = match try_encode_packet(&packet) {
-                Ok(buf) => buf,
-                Err(e) => {
-                    eprintln!("Failed to encode packet: {:?}", e);
-                    continue;
-                }
-            };
+            let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
 
             let mut packet_number = packet_number.lock().await;
             let mut packets = packets_being_sent.write().await;
@@ -260,12 +370,12 @@ fn start_peer_sender_worker(
                             SocketPacketType::Data,
                             *packet_number,
                             chunk_idx as u32,
-                            false,
-                            chunk,
+                            vec![],
                         )
+                        .expect("Failed to create data packet")
                     })
             {
-                match peer_outbound_tx.send(net_packet.clone()).await {
+                match net_outbound_tx.send(net_packet.clone()).await {
                     Ok(_) => {
                         // add the packet to hashmap of packets that we don't have a ACK to
                         packets.insert(
@@ -273,8 +383,8 @@ fn start_peer_sender_worker(
                             net_packet.clone(),
                         );
                         let packets_being_sent = packets_being_sent.clone();
-						let peer_outbound_tx_clone = peer_outbound_tx.clone();
-						let state_clone = state.clone();
+                        let net_outbound_tx_clone = net_outbound_tx.clone();
+                        let state_clone = state.clone();
 
                         // spawn a new task that keeps checking if we've received an ACK yet
                         // if we haven't, resend the packet
@@ -294,7 +404,7 @@ fn start_peer_sender_worker(
                                     while packets.contains_key(&(packet_number, chunk_number)){
                                         debug!("packet with number {} chunk {} did not receive an ACK, sleeping for 500ms and trying again", packet_number, chunk_number);
                                         tokio::time::sleep(Duration::from_millis(500)).await;
-                                        match peer_outbound_tx_clone.send(net_packet.clone()).await {
+                                        match net_outbound_tx_clone.send(net_packet.clone()).await {
                                             Ok(_) => {},
                                             Err(_) => break
                                         }
@@ -315,26 +425,23 @@ fn start_peer_sender_worker(
 /// decoded contents to the application.
 fn start_peer_receiver_worker(
     state: Arc<RwLock<PeerState>>,
-    peer_outbound_tx: mpsc::Sender<SocketPacket>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
     app_inbound_tx: mpsc::Sender<ProtocolPacket>,
-    mut peer_inbound_rx: mpsc::Receiver<SocketPacket>,
-    crypto: Arc<RwLock<Crypto>>,
+    mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
+    remote_addr: SocketAddr,
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
     packet_number: Arc<Mutex<u32>>,
     packets_being_sent: Arc<RwLock<HashMap<(u32, u32), SocketPacket>>>,
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
         // packets that make up a single protocol message
-        let mut packet_queue = std::collections::BinaryHeap::new();
+        let mut packet_queue = BinaryHeap::new();
 
         loop {
             trace!("start_peer_receiver_worker loop");
 
-            // receive packet from crypto
-            let packet: SocketPacket = match peer_inbound_rx.recv().await {
-                Some(packet) => packet,
-                None => break,
-            };
+            let packet: SocketPacket = maybe_break!(net_inbound_rx.recv().await);
 
             // read current state
             let current_state = {
@@ -357,28 +464,25 @@ fn start_peer_receiver_worker(
                         SocketPacketType::Ack => {
                             // write to network
                             try_break!(
-                                peer_outbound_tx
-                                    .send(SocketPacket::new(
+                                net_outbound_tx
+                                    .send(SocketPacket::empty(
                                         SocketPacketType::SynAck,
                                         packet.packet_number,
                                         0,
-                                        false,
-                                        vec![],
                                     ))
                                     .await
                             );
                             // transition to key init state
                             debug!(
                                 ?current_state,
-                                next = ?PeerState::KeyInit,
+                                next = ?PeerState::Established,
                                 "state transition"
                             );
-                            *state.write().await = PeerState::KeyInit;
+                            *state.write().await = PeerState::Established;
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
-                        | SocketPacketType::Invalid
-                        | SocketPacketType::Kex => {}
+                        | SocketPacketType::Invalid => {}
                     }
                 }
                 PeerState::Connect => {
@@ -387,31 +491,28 @@ fn start_peer_receiver_worker(
                             // responder never receives ACK
                         }
                         SocketPacketType::Syn => {
-                            let ack = SocketPacket::new(
-                                SocketPacketType::Ack,
-                                packet.packet_number,
-                                0,
-                                false,
-                                vec![],
-                            );
+                            let ack =
+                                SocketPacket::empty(SocketPacketType::Ack, packet.packet_number, 0);
                             // write to network
-                            try_break!(peer_outbound_tx.send(ack).await);
+                            try_break!(net_outbound_tx.send(ack).await);
                         }
-                        SocketPacketType::SynAck => {}
+                        SocketPacketType::SynAck => {
+                            debug!(
+                                ?current_state,
+                                next = ?PeerState::Established,
+                                "state transition"
+                            );
+                            *state.write().await = PeerState::Established;
+                        }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
-                        | SocketPacketType::Kex
                         | SocketPacketType::Invalid => {}
                     }
                 }
-                PeerState::Established
-                | PeerState::KeyRecv
-                | PeerState::KeyInit
-                | PeerState::AwaitFirst => match packet.packet_type {
+                PeerState::Established => match packet.packet_type {
                     SocketPacketType::Syn
                     | SocketPacketType::SynAck
                     | SocketPacketType::Heartbeat
-                    | SocketPacketType::Kex
                     | SocketPacketType::Invalid => {}
                     SocketPacketType::Ack => {
                         let mut packets = packets_being_sent.write().await;
@@ -420,13 +521,11 @@ fn start_peer_receiver_worker(
                     SocketPacketType::Data => {
                         // send ack
                         try_break!(
-                            peer_outbound_tx
-                                .send(SocketPacket::new(
+                            net_outbound_tx
+                                .send(SocketPacket::empty(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
                                     packet.chunk_number,
-                                    false,
-                                    vec![],
                                 ))
                                 .await
                         );
@@ -437,14 +536,14 @@ fn start_peer_receiver_worker(
                         // attempt to decode
                         let data_len: usize = packet_queue
                             .iter()
-                            .map(|Reverse(packet)| packet.data.len())
+                            .map(|Reverse(packet)| packet.compressed_data.len())
                             .sum();
 
                         let mut buf = Vec::with_capacity(data_len);
 
-                        packet_queue
-                            .iter()
-                            .for_each(|Reverse(packet)| buf.append(&mut packet.data.clone()));
+                        packet_queue.iter().for_each(|Reverse(packet)| {
+                            buf.append(&mut packet.compressed_data.clone())
+                        });
 
                         let packet = match try_decode_packet(buf) {
                             Ok(packet) => packet,
@@ -452,255 +551,60 @@ fn start_peer_receiver_worker(
                         };
 
                         if current_state == PeerState::Established {
-                            // forward to application
-                            debug!(?packet, "forward packet to application");
-                            try_break!(app_inbound_tx.send(packet).await);
-
-                            // clear queue
+                            // clear queue - return early to avoid lots of nesting
                             debug!("clear packet queue");
                             packet_queue.clear();
+                            continue;
                         }
+
+                        match packet.packet_type {
+                            Some(ProtocolPacketType::PktGossip(ref gossip)) => {
+                                // check if we are missing a signed ppacket
+                                if let None = gossip.packet {
+                                    continue;
+                                }
+
+                                let signed_packet = gossip.packet.as_ref().unwrap();
+
+                                let forward = {
+                                    let mut peers = peers.write().await;
+                                    let peer = match peers.get_mut(&remote_addr) {
+                                        Some(p) => p,
+                                        None => {
+                                            continue;
+                                        }
+                                    };
+
+                                    // Verify signature on packet
+                                    let signed_packet =
+                                        try_continue!(try_verify_packet_sig(&signed_packet));
+
+                                    // Dispatch gossip to respective code if its for us...
+                                    peer.dispatch_gossip(
+                                        signed_packet.clone(),
+                                        app_inbound_tx.clone(),
+                                    )
+                                    .await
+                                    .unwrap()
+                                };
+                                // ..., otherwise, forward it on to our peers
+                                if forward {
+                                    drop(peers);
+                                    let _ =
+                                        Socket::forward_gossip(packet, peers.clone(), remote_addr)
+                                            .await;
+                                }
+                            }
+                            Some(_) => {}
+                            None => {}
+                        }
+
+                        // clear queue
+                        debug!("clear packet queue");
+                        packet_queue.clear();
                     }
                 },
                 PeerState::Dead => {}
-            }
-        }
-    });
-}
-
-fn start_crypto_receiver_worker(
-    state: Arc<RwLock<PeerState>>,
-    net_outbound_tx: mpsc::Sender<SocketPacket>,
-    peer_inbound_tx: mpsc::Sender<SocketPacket>,
-    mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
-    peer_outbound_tx: mpsc::Sender<SocketPacket>,
-    crypto: Arc<RwLock<Crypto>>,
-) {
-    tokio::task::spawn(async move {
-        loop {
-            let mut packet: SocketPacket = match net_inbound_rx.recv().await {
-                Some(packet) => packet,
-                None => {
-                    continue;
-                }
-            };
-
-            let current_state = { *state.read().await };
-            debug!(
-                state = ?current_state,
-                packet = ?packet.packet_type,
-                "crypto received packet"
-            );
-            // Should be pass this packet to peer?
-            let mut pass_packet = true;
-            match packet.packet_type {
-                SocketPacketType::Kex => {
-                    let packet_ = match try_decode_packet(packet.data.clone()) {
-                        Ok(p) => p,
-                        Err(_) => continue,
-                    };
-                    match current_state {
-                        PeerState::KeyRecv => {
-                            // We are "Bob", or the passive receiving side.
-                            // On kex packet, we send our keys to "Alice", and then
-                            // wait for the compulsory first message from Alice to kickstart DR
-                            let result = crypto.write().await.handle_kex(packet_, current_state);
-                            match result {
-                                Ok(_) => {
-                                    let key_recv_packet = crypto.read().await.kex_packet();
-                                    let buf = match try_encode_packet(&key_recv_packet) {
-                                        Ok(buf) => buf,
-                                        Err(e) => {
-                                            eprintln!("Failed to encode packet: {:?}", e);
-                                            continue;
-                                        }
-                                    };
-                                    match net_outbound_tx
-                                        .send(SocketPacket::new(
-                                            SocketPacketType::Kex,
-                                            0,
-                                            0,
-                                            false,
-                                            buf,
-                                        ))
-                                        .await
-                                    {
-                                        Ok(_) => {}
-                                        Err(_) => {}
-                                    }
-                                    {
-                                        *state.write().await = PeerState::AwaitFirst
-                                    };
-                                    pass_packet = false;
-                                }
-                                Err(_) => {}
-                            }
-                        }
-                        PeerState::KeyInit => {
-                            // We are "Alice", or the active sending side.
-                            // We have received our reply from bob,
-                            // now we encrypt an empty first message to send to bob
-                            let result = crypto.write().await.handle_kex(packet_, current_state);
-                            match result {
-                                Ok(_) => {
-                                    let mut first_pkt = ProtocolPacket::default();
-                                    first_pkt.packet = Some(packet::v1::packet::Packet::PktFirst(
-                                        packet::v1::FirstPacket {},
-                                    ));
-                                    let buf = match try_encode_packet(&first_pkt) {
-                                        Ok(buf_) => buf_,
-                                        Err(e) => {
-                                            eprintln!("Failed to encode packet: {:?}", e);
-                                            continue;
-                                        }
-                                    };
-                                    debug!(
-                                        ?current_state,
-                                        next = ?PeerState::Established,
-                                        "state transition"
-                                    );
-                                    *state.write().await = PeerState::Established;
-                                    match peer_outbound_tx
-                                        .send(SocketPacket::new(
-                                            SocketPacketType::Data,
-                                            0,
-                                            0,
-                                            false,
-                                            buf,
-                                        ))
-                                        .await
-                                    {
-                                        Ok(_) => {}
-                                        Err(_) => {}
-                                    }
-                                }
-                                Err(_) => {}
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                SocketPacketType::Data => {
-                    match current_state {
-                        PeerState::AwaitFirst => {
-                            // We are "Bob", we have received our first empty encrypted message
-                            // from "Alice", so we decrypt it but do not pass on to app
-                            // because it's not a real message
-                            debug!(
-                                ?current_state,
-                                next = ?PeerState::AwaitFirst,
-                                "state transition"
-                            );
-                            {
-                                *state.write().await = PeerState::Established;
-                            }
-                            pass_packet = false;
-                        }
-                        _ => {}
-                    }
-                }
-                SocketPacketType::SynAck => {
-                    // I am "Bob", ready to receive key from "Alice"
-                    // We are supposed to do this in the peer receiver thread
-                    // But due to code below in the sender to send a SynAck and a Kex
-                    // in rapid succession, by the time the peer transitions state
-                    // it would be too late
-                    debug!(
-                        ?current_state,
-                        next = ?PeerState::KeyRecv,
-                        "state transition"
-                    );
-                    *state.write().await = PeerState::KeyRecv;
-                }
-                _ => {}
-            };
-            if packet.encrypted {
-                let mut crypto_ = crypto.write().await;
-                match crypto_.decrypt(&packet.data) {
-                    Ok(dec) => {
-                        packet.data = dec;
-                    }
-                    Err(_) => {
-                        continue;
-                    }
-                }
-            }
-            if pass_packet {
-                match peer_inbound_tx.send(packet).await {
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
-            }
-        }
-    });
-}
-
-fn start_crypto_sender_worker(
-    state: Arc<RwLock<PeerState>>,
-    net_outbound_tx: mpsc::Sender<SocketPacket>,
-    peer_inbound_tx: mpsc::Sender<SocketPacket>,
-    mut peer_outbound_rx: mpsc::Receiver<SocketPacket>,
-    crypto: Arc<RwLock<Crypto>>,
-) {
-    tokio::task::spawn(async move {
-        loop {
-            let packet: SocketPacket = match peer_outbound_rx.recv().await {
-                Some(packet) => packet,
-                None => break,
-            };
-
-            let current_state = { *state.read().await };
-
-            // Usually we just need to forward the one packet from peer to net
-            // However, when we see a SynAck sent, we are initiating side ("Alice")
-            // We should follow the SynAck with a Kex, which will be pushed into this queue
-            let mut packet_queue: Vec<SocketPacket> = Vec::new();
-            let packet_data: Vec<u8> = packet.data.clone();
-            let packet_type = packet.packet_type.clone();
-            packet_queue.push(packet);
-
-            match packet_type {
-                SocketPacketType::Data => {
-                    match current_state {
-                        PeerState::Established => {
-                            // Encrypt data packet before sending
-                            let mut crypto_ = crypto.write().await;
-                            let actual = match crypto_.encrypt(&packet_data) {
-                                Ok(enc) => enc,
-                                Err(_) => {
-                                    continue;
-                                }
-                            };
-                            let _ = packet_queue.pop();
-                            packet_queue.push(SocketPacket::new(
-                                SocketPacketType::Data,
-                                0,
-                                0,
-                                true,
-                                actual,
-                            ));
-                        }
-                        _ => {}
-                    }
-                }
-                SocketPacketType::SynAck => {
-                    let key_init_packet = crypto.read().await.kex_packet();
-                    let buf = match try_encode_packet(&key_init_packet) {
-                        Ok(buf) => buf,
-                        Err(e) => {
-                            eprintln!("Failed to encode packet: {:?}", e);
-                            continue;
-                        }
-                    };
-                    packet_queue.push(SocketPacket::new(SocketPacketType::Kex, 0, 0, false, buf));
-                }
-                _ => {}
-            };
-            for queued_packet in packet_queue {
-                match net_outbound_tx.send(queued_packet).await {
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
             }
         }
     });

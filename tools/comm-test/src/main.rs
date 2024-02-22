@@ -1,11 +1,11 @@
 use clap::Parser;
 use comm::{peer::PeerState, Socket};
+use protocol::{messages, ProtocolPacket, ProtocolPacketType};
+use std::io;
 use std::{net::SocketAddr, time::Duration};
+use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
-use protocol::{ProtocolPacket, messages, packet};
-use std::io;
-use tokio::sync::mpsc;
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -18,6 +18,8 @@ struct Args {
     /// Whether to initiate the connection.
     #[clap(long)]
     initiate: bool,
+    #[clap(long)]
+    username: String,
 }
 
 #[tokio::main]
@@ -26,6 +28,7 @@ async fn main() {
         bind_port,
         initiate,
         peer_addrs,
+        username,
     } = Args::parse();
 
     // initialise tracing
@@ -38,7 +41,7 @@ async fn main() {
         .init();
 
     // bind to the socket
-    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port).into()).await {
+    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), username.clone()).await {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -51,7 +54,7 @@ async fn main() {
     let mut receivers: Vec<mpsc::Receiver<ProtocolPacket>> = Vec::new();
 
     for peer_addr in &peer_addrs {
-        let (app_outbound_tx, mut app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
+        let (app_outbound_tx, app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
         senders.push(app_outbound_tx);
         receivers.push(app_inbound_rx);
     }
@@ -65,7 +68,7 @@ async fn main() {
     let mut tick: u16 = 0;
 
     while tick < 5 * 60 * 2 && ready_peers.len() != peer_addrs.len() {
-        for i in 0..peer_addrs.len() {
+        for (i, _) in peer_addrs.iter().enumerate() {
             if !ready_peers.contains(&i) {
                 match socket.get_peer_state(peer_addrs[i]).await {
                     None => {}
@@ -89,49 +92,58 @@ async fn main() {
     }
 
     info!("[+] All connections succeeded!");
-    info!("[+] Chat log follows below, enter any input to send:");
-
+    info!("[+] Chat log follows below:");
+    info!("[+] Use /dr <username> to start a chat with user");
+    info!("[+] Then use /msg <username> <message> to send a message");
 
     tokio::task::spawn(async move {
         loop {
-            for (i, mut app_inbound_rx) in receivers.iter_mut().enumerate() {
-                match app_inbound_rx.try_recv() {
-                    Ok(recv) => {
-                        match recv.packet {
-                            Some(packet::v1::packet::Packet::PktMessage(m)) => {
-                                info!("<{0}>: {1}", peer_addrs[i], m.content);
-                            },
-                            Some(packet::v1::packet::Packet::PktCrypto(_)) => {},
-                            Some(packet::v1::packet::Packet::PktFirst(_)) => {}
-                            None => {}
+            for app_inbound_rx in receivers.iter_mut() {
+                if let Ok(recv) = app_inbound_rx.try_recv() {
+                    match recv.packet_type {
+                        Some(ProtocolPacketType::PktMessage(m)) => {
+                            info!("<{0}>: {1}", m.username, m.content);
                         }
-                    },
-                    Err(_) => {}
+                        Some(_) => {}
+                        None => {}
+                    }
                 };
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     });
     loop {
-         let mut input = String::new();
-         let mut pkt = ProtocolPacket::default();
+        let mut input = String::new();
 
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => {
-                let trimmed = input.trim();
-                let message = messages::v1::Message {
-                    id: "test-id".to_string(),
-                    channel_id: "test-channel".to_string(),
-                    username: "test-username".to_string(),
-                    content: trimmed.to_string(),
-                    attachments: vec![]
-                };
-                pkt.packet = Some(packet::v1::packet::Packet::PktMessage(message));
-                for app_outbound_tx in &senders {
-                    let _ = app_outbound_tx.send(pkt.clone()).await;
+        if (io::stdin().read_line(&mut input)).is_ok() {
+            let mut trimmed = input.trim();
+            if trimmed.starts_with('/') {
+                trimmed = &trimmed[1..];
+                if let Some((prefix, rest)) = trimmed.split_once(' ') {
+                    if prefix == "dr" {
+                        let _ = socket.start_dr(rest.to_string()).await;
+                    } else if prefix == "msg" {
+                        if let Some((destination, message)) = rest.split_once(' ') {
+                            let message = messages::v1::Message {
+                                id: "test-id".to_string(),
+                                channel_id: "test-channel".to_string(),
+                                username: username.to_string(),
+                                content: message.to_string(),
+                                attachments: vec![],
+                            };
+                            let packet = ProtocolPacket {
+                                packet_type: Some(ProtocolPacketType::PktMessage(message)),
+                            };
+                            let _ = Socket::send_gossip_encrypted(
+                                packet,
+                                socket.peers.clone(),
+                                destination.to_string(),
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
-            Err(_) => {}
         }
     }
 }
