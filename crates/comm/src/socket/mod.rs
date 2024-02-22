@@ -2,7 +2,7 @@
 
 use std::{
     cmp::Ordering,
-    collections::{hash_map, HashMap},
+    collections::{hash_map::Entry, HashMap},
     io::{self, Cursor, Read, Write},
     net::SocketAddr,
     sync::Arc,
@@ -21,8 +21,9 @@ use tracing::{debug, error, span, trace};
 
 use crate::{
     crypto::{Crypto, DoubleRatchet},
+    maybe_continue,
     peer::{Peer, PeerError, PeerState},
-    try_continue,
+    try_break, try_continue,
 };
 
 /// The magic number used to identify packets sent over the network.
@@ -288,8 +289,8 @@ impl Socket {
     pub async fn start_dr(&mut self, destination: String) -> Result<(), SocketError> {
         let mut crypto = self.crypto.write().await;
         match crypto.ratchets.entry(destination.clone()) {
-            hash_map::Entry::Occupied(_) => Err(SocketError::RatchetExists),
-            hash_map::Entry::Vacant(entry) => {
+            Entry::Occupied(_) => Err(SocketError::RatchetExists),
+            Entry::Vacant(entry) => {
                 let mut dr = DoubleRatchet::new_initiator();
                 let kex_msg = dr.generate_kex_message();
                 entry.insert(dr);
@@ -309,37 +310,24 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
         loop {
             trace!("start outbound worker loop");
             // wait for socket to be readable
-            if let Err(e) = socket.readable().await {
-                eprintln!("Error reading from socket: {:?}", e);
-                break;
-            }
+            let _ = try_break!(socket.readable().await, "Error reading from socket");
 
             // receive packet
             let (size, addr) = try_continue!(
                 socket.recv_from(&mut buf).await,
                 "Error reading from network"
             );
+
             // see if we know this peer
             let mut peers = peers.write().await;
-            let peer = match peers.get_mut(&addr) {
-                Some(peer) => peer,
-                None => {
-                    eprintln!("Unknown peer: {:?}", addr);
-                    continue;
-                }
-            };
+            let peer = maybe_continue!(peers.get_mut(&addr), "Unknown peer {:?}", addr);
 
             // decode network packet
-            let packet = match SocketPacket::decode(&buf[..size]) {
-                Ok(packet) => packet,
-                Err(e) => {
-                    eprintln!("Error decoding packet: {:?}", e);
-                    continue;
-                }
-            };
+            let packet = try_continue!(SocketPacket::decode(&buf[..size]), "Error decoding packet");
 
             // forward to peer
             debug!(?peer.remote_addr, "forward packet to peer");
+
             if let Err(e) = peer.net_inbound_tx.send(packet).await {
                 eprintln!("Error forwarding packet to peer: {:?}", e);
             }
@@ -356,6 +344,7 @@ fn spawn_inbound_peer_task(
     tokio::spawn(async move {
         loop {
             trace!("start inbound peer task loop");
+
             // receive packet from peer
             let packet = match net_outbound_rx.recv().await {
                 Some(packet) => packet,
@@ -363,13 +352,7 @@ fn spawn_inbound_peer_task(
             };
 
             // encode packet
-            let bytes = match packet.encode() {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    eprintln!("Error encoding packet: {:?}", e);
-                    continue;
-                }
-            };
+            let bytes = try_continue!(packet.encode(), "Error encoding packet");
 
             // send to network
             debug!(?destination, len = bytes.len(), "send packet to network");
@@ -384,7 +367,7 @@ fn spawn_inbound_peer_task(
 ///
 /// A header, consisting of:
 /// - 4 bytes: Magic number (0x010203)
-/// - 1 byte: Packet type (0 = SYN, 1 = ACK, 2 = SYNACK, 3 = HEARTBEAT, 4 = DATA)
+/// - 1 byte: Packet type (0 = SYN, 1 = ACK, 2 = SYNACK, 3 = HEARTBEAT, 4 = DATA) - see [SocketPacketType].
 /// - 4 bytes: Sequence number
 /// - 4 bytes: Length of the compressed data
 /// - 4 bytes: Length of the uncompressed data
