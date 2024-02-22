@@ -1,7 +1,7 @@
 //! Defines the UDP socket abstraction and first-layer packet format used for communication between peers.
 
 use std::{
-    cmp::{self, Ordering},
+    cmp::Ordering,
     collections::{hash_map, HashMap},
     io::{self, Cursor, Read, Write},
     net::SocketAddr,
@@ -390,6 +390,7 @@ fn spawn_inbound_peer_task(
 /// - 4 bytes: Length of the uncompressed data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
+#[derive(Debug, Clone)]
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,

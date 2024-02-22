@@ -14,7 +14,7 @@ use protocol::{
 };
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
+    collections::{BinaryHeap, HashMap, HashSet},
     fmt,
     net::SocketAddr,
     sync::Arc,
@@ -23,8 +23,9 @@ use std::{
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::SendError},
-    RwLock,
+    Mutex, RwLock,
 };
+use tokio::{select, time::sleep};
 use tracing::{debug, error, span, trace, warn, Level};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
@@ -123,6 +124,10 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
+        let crypto = Arc::new(RwLock::new(Crypto::new()));
+        let packet_number = Arc::new(Mutex::new(0));
+        let pending_acks = Arc::new(RwLock::new(HashSet::new()));
+
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
             start_peer_receiver_worker(
                 state.clone(),
@@ -131,11 +136,20 @@ impl Peer {
                 net_inbound_rx,
                 remote_addr,
                 peers.clone(),
+                packet_number.clone(),
+                pending_acks.clone(),
             )
         });
 
         span!(Level::TRACE, "peer::sender", %remote_addr).in_scope(|| {
-            start_peer_sender_worker(state.clone(), net_outbound_tx.clone(), app_outbound_rx)
+            start_peer_sender_worker(
+                state.clone(),
+                net_outbound_tx.clone(),
+                app_outbound_rx,
+                crypto.clone(),
+                packet_number.clone(),
+                pending_acks.clone(),
+            )
         });
 
         (
@@ -258,7 +272,6 @@ impl Peer {
                         }
                         DoubleRatchet::AlmostInitialized { .. }
                         | DoubleRatchet::Initialized { .. } => {
-                            // Should not reach here
                             unreachable!()
                         }
                     }
@@ -291,6 +304,9 @@ fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
+    crypto: Arc<RwLock<Crypto>>,
+    packet_number: Arc<Mutex<u32>>,
+    pending_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
@@ -308,7 +324,7 @@ fn start_peer_sender_worker(
                 try_break!(
                     net_outbound_tx
                         .send(
-                            SocketPacket::new(SocketPacketType::Syn, syns_sent, 0, vec![],)
+                            SocketPacket::new(SocketPacketType::Syn, syns_sent, 0, vec![])
                                 .expect("Failed to create syn packet")
                         )
                         .await
@@ -331,17 +347,78 @@ fn start_peer_sender_worker(
             trace!("encode packet: {:?}", packet);
             let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
 
+            // these locks may cause some contention - investigate
+            let mut packet_number = packet_number.lock().await;
+            let mut pending_acks_write = pending_acks.write().await;
+
             // split packet into network packets and send
-            for net_packet in buf
-                .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
-                .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
+            for net_packet in
+                buf.chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
+                    .enumerate()
+                    .map(|(chunk_idx, chunk)| {
+                        SocketPacket::new(
+                            SocketPacketType::Data,
+                            *packet_number,
+                            chunk_idx as u32,
+                            vec![],
+                        )
+                        .expect("Failed to create data packet")
+                    })
             {
-                try_break!(
-                    net_outbound_tx
-                        .send(net_packet.expect("failed to create packet"))
-                        .await
-                );
+                match net_outbound_tx.send(net_packet.clone()).await {
+                    Ok(_) => {
+                        // add the packet to hashmap of packets that we don't have a ACK to
+                        pending_acks_write
+                            .insert((net_packet.packet_number, net_packet.chunk_number));
+
+                        // start a task that will wait for an ACK for this packet
+                        start_ack_timeout_worker(
+                            state.clone(),
+                            pending_acks.clone(),
+                            net_outbound_tx.clone(),
+                            net_packet.clone(),
+                        );
+                    }
+                    Err(_) => break,
+                };
             }
+            *packet_number += 1;
+        }
+    });
+}
+
+/// Periodically checks if we've received an ACK for a packet, and if not, resends the packet.
+/// Times out after 30s and transitions the peer to the dead state.
+fn start_ack_timeout_worker(
+    state: Arc<RwLock<PeerState>>,
+    packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
+    net_outbound_tx: mpsc::Sender<SocketPacket>,
+    net_packet: SocketPacket,
+) {
+    // spawn a new task that keeps checking if we've received an ACK yet
+    // if we haven't, resend the packet
+    tokio::spawn(async move {
+        let timeout = Duration::from_secs(30);
+        let (packet_number, chunk_number) = (net_packet.packet_number, net_packet.chunk_number);
+
+        select! {
+            _ = sleep(timeout) => {
+                debug!("packet with number {} chunk {} did not receive an ACK in 30s - peer dead", packet_number, chunk_number);
+                *state.write().await = PeerState::Dead;
+            },
+
+            _ = async {
+                loop {
+                    // wait for 1s before checking if we've received an ACK
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    let has_packet = { packet_acks.read().await.contains(&(packet_number, chunk_number))};
+                    if !has_packet {
+                        break;
+                    }
+                    // retransmit
+                    try_break!(net_outbound_tx.send(net_packet.clone()).await);
+                }
+            } => {}
         }
     });
 }
@@ -355,6 +432,8 @@ fn start_peer_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     remote_addr: SocketAddr,
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    packet_number: Arc<Mutex<u32>>,
+    packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
@@ -390,7 +469,7 @@ fn start_peer_receiver_worker(
                                 net_outbound_tx
                                     .send(SocketPacket::empty(
                                         SocketPacketType::SynAck,
-                                        packet.packet_number + 1,
+                                        packet.packet_number,
                                         0,
                                     ))
                                     .await
@@ -414,11 +493,8 @@ fn start_peer_receiver_worker(
                             // responder never receives ACK
                         }
                         SocketPacketType::Syn => {
-                            let ack = SocketPacket::empty(
-                                SocketPacketType::Ack,
-                                packet.packet_number + 1,
-                                0,
-                            );
+                            let ack =
+                                SocketPacket::empty(SocketPacketType::Ack, packet.packet_number, 0);
                             // write to network
                             try_break!(net_outbound_tx.send(ack).await);
                         }
@@ -437,10 +513,13 @@ fn start_peer_receiver_worker(
                 }
                 PeerState::Established => match packet.packet_type {
                     SocketPacketType::Syn
-                    | SocketPacketType::Ack
                     | SocketPacketType::SynAck
                     | SocketPacketType::Heartbeat
                     | SocketPacketType::Invalid => {}
+                    SocketPacketType::Ack => {
+                        let mut packets = packet_acks.write().await;
+                        packets.remove(&(packet.packet_number, packet.chunk_number));
+                    }
                     SocketPacketType::Data => {
                         // send ack
                         try_break!(
@@ -448,7 +527,7 @@ fn start_peer_receiver_worker(
                                 .send(SocketPacket::empty(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
-                                    0,
+                                    packet.chunk_number,
                                 ))
                                 .await
                         );
