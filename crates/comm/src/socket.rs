@@ -10,17 +10,18 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use protocol::{prost::DecodeError, try_decode_packet, MessageType, ProtocolPacket};
-use rand::{rngs::OsRng, seq::SliceRandom};
+use rand::{rngs::OsRng, seq::IteratorRandom};
 use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
-use tracing::{debug, span, trace};
+use tracing::{debug, error, span, trace};
 
 use crate::{
     crypto::{Crypto, DoubleRatchet},
     peer::{Peer, PeerError, PeerState},
+    try_continue,
 };
 
 /// The magic number used to identify packets sent over the network.
@@ -32,6 +33,9 @@ pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
 
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
+
+/// Number of peers to send gossip to
+const GOSSIP_COUNT: usize = 3;
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
@@ -185,51 +189,47 @@ impl Socket {
         Ok(())
     }
 
-    /// Selects at most 3 peers randomly from list of peers
+    /// Selects at most 3 peers randomly from list of peers - should
+    /// probably employ round robin here.
     pub async fn select_gossip_peers(
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+        &self,
         skip: Option<SocketAddr>,
     ) -> Result<Vec<SocketAddr>, SocketError> {
-        // Number of peers to send gossip to
-        const GOSSIP_CNT: usize = 3;
+        let targets: Vec<_> = self
+            .peers
+            .read()
+            .await
+            .keys()
+            // skip if included
+            .filter(|addr| skip.map(|skip_addr| skip_addr != **addr).unwrap_or(true))
+            .cloned()
+            .choose_multiple(&mut OsRng, GOSSIP_COUNT);
 
-        let mut peer_addrs: Vec<SocketAddr> = { peers.read().await.keys().cloned().collect() };
-
-        if peer_addrs.is_empty() {
+        // we have no targets!
+        if targets.is_empty() {
             return Err(SocketError::NoPeer);
         }
 
-        if let Some(skip_addr) = skip {
-            peer_addrs.retain(|&x| x != skip_addr);
-        }
-
-        let gossip_cnt = cmp::min(peer_addrs.len(), GOSSIP_CNT);
-        let gossip_targets: Vec<SocketAddr> = peer_addrs
-            .choose_multiple(&mut OsRng, gossip_cnt)
-            .cloned()
-            .collect();
-        Ok(gossip_targets)
+        Ok(targets)
     }
 
     /// Sends non-encrypted message to a random group of peers
     /// Use this to send key exchange messages
     pub async fn send_gossip(
+        &self,
         message: MessageType,
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         destination: String,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), None).await?;
+        let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
-            {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_gossip_single(message.clone(), destination.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers = self.peers.write().await;
+            let target_peer = peers.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single(message.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -238,22 +238,21 @@ impl Socket {
     /// Use this to send a ProtocolPacket containing a PktMessage,
     /// which contains the message data
     pub async fn send_gossip_encrypted(
+        &self,
         packet: ProtocolPacket,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         destination: String,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), None).await?;
+        let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
-            {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_gossip_single_encrypted(packet.clone(), destination.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers_write = peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single_encrypted(packet.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -261,22 +260,20 @@ impl Socket {
     /// Forwards a received gossip packet as is to a random group of peers
     /// Internal use only for forwarding gossip packets not intended for us
     pub async fn forward_gossip(
+        &self,
         packet: ProtocolPacket,
-        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         skip: SocketAddr,
     ) -> Result<(), SocketError> {
-        let gossip_targets = Socket::select_gossip_peers(peers.clone(), Some(skip)).await?;
+        let gossip_targets = self.select_gossip_peers(Some(skip)).await?;
         for target in gossip_targets {
-            {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_packet(packet.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers_write = self.peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_packet(packet.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -293,12 +290,8 @@ impl Socket {
                 let kex_msg = dr.generate_kex_message();
                 entry.insert(dr);
                 drop(crypto);
-                Socket::send_gossip(
-                    MessageType::KeyExchange(kex_msg),
-                    self.peers.clone(),
-                    destination,
-                )
-                .await?;
+                self.send_gossip(MessageType::KeyExchange(kex_msg), destination)
+                    .await?;
                 Ok(())
             }
         }
@@ -318,14 +311,10 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             }
 
             // receive packet
-            let (size, addr) = match socket.recv_from(&mut buf).await {
-                Ok((size, addr)) => (size, addr),
-                Err(e) => {
-                    eprintln!("Error reading from network: {:?}", e);
-                    continue;
-                }
-            };
-
+            let (size, addr) = try_continue!(
+                socket.recv_from(&mut buf).await,
+                "Error reading from network"
+            );
             // see if we know this peer
             let mut peers = peers.write().await;
             let peer = match peers.get_mut(&addr) {
