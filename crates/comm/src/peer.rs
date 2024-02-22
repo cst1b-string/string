@@ -307,12 +307,10 @@ fn start_peer_sender_worker(
             if current_state == PeerState::Init || current_state == PeerState::Connect {
                 try_break!(
                     net_outbound_tx
-                        .send(SocketPacket::new(
-                            SocketPacketType::Syn,
-                            syns_sent,
-                            0,
-                            vec![],
-                        ))
+                        .send(
+                            SocketPacket::new(SocketPacketType::Syn, syns_sent, 0, vec![],)
+                                .expect("Failed to create syn packet")
+                        )
                         .await
                 );
                 syns_sent += 1;
@@ -338,7 +336,11 @@ fn start_peer_sender_worker(
                 .chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
                 .map(|chunk| SocketPacket::new(SocketPacketType::Data, 0, 0, chunk))
             {
-                try_break!(net_outbound_tx.send(net_packet).await);
+                try_break!(
+                    net_outbound_tx
+                        .send(net_packet.expect("failed to create packet"))
+                        .await
+                );
             }
         }
     });
@@ -386,11 +388,10 @@ fn start_peer_receiver_worker(
                             // write to network
                             try_break!(
                                 net_outbound_tx
-                                    .send(SocketPacket::new(
+                                    .send(SocketPacket::empty(
                                         SocketPacketType::SynAck,
                                         packet.packet_number + 1,
                                         0,
-                                        vec![],
                                     ))
                                     .await
                             );
@@ -413,11 +414,10 @@ fn start_peer_receiver_worker(
                             // responder never receives ACK
                         }
                         SocketPacketType::Syn => {
-                            let ack = SocketPacket::new(
+                            let ack = SocketPacket::empty(
                                 SocketPacketType::Ack,
                                 packet.packet_number + 1,
                                 0,
-                                vec![],
                             );
                             // write to network
                             try_break!(net_outbound_tx.send(ack).await);
@@ -445,11 +445,10 @@ fn start_peer_receiver_worker(
                         // send ack
                         try_break!(
                             net_outbound_tx
-                                .send(SocketPacket::new(
+                                .send(SocketPacket::empty(
                                     SocketPacketType::Ack,
                                     packet.packet_number,
                                     0,
-                                    vec![],
                                 ))
                                 .await
                         );
@@ -460,14 +459,14 @@ fn start_peer_receiver_worker(
                         // attempt to decode
                         let data_len: usize = packet_queue
                             .iter()
-                            .map(|Reverse(packet)| packet.data.len())
+                            .map(|Reverse(packet)| packet.compressed_data.len())
                             .sum();
 
                         let mut buf = Vec::with_capacity(data_len);
 
-                        packet_queue
-                            .iter()
-                            .for_each(|Reverse(packet)| buf.append(&mut packet.data.clone()));
+                        packet_queue.iter().for_each(|Reverse(packet)| {
+                            buf.append(&mut packet.compressed_data.clone())
+                        });
 
                         let packet = match try_decode_packet(buf) {
                             Ok(packet) => packet,
