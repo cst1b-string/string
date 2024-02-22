@@ -222,16 +222,14 @@ impl Socket {
     ) -> Result<(), SocketError> {
         let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
-            {
-                let mut peers = self.peers.write().await;
-                let target_peer = peers.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_gossip_single(message.clone(), destination.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers = self.peers.write().await;
+            let target_peer = peers.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single(message.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -247,16 +245,14 @@ impl Socket {
     ) -> Result<(), SocketError> {
         let gossip_targets = self.select_gossip_peers(None).await?;
         for target in gossip_targets {
-            {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_gossip_single_encrypted(packet.clone(), destination.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers_write = peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single_encrypted(packet.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -270,16 +266,14 @@ impl Socket {
     ) -> Result<(), SocketError> {
         let gossip_targets = self.select_gossip_peers(Some(skip)).await?;
         for target in gossip_targets {
-            {
-                let mut peers_write = self.peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                if (target_peer
-                    .expect("No such peer")
-                    .send_packet(packet.clone())
-                    .await)
-                    .is_ok()
-                {}
-            }
+            let mut peers_write = self.peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_packet(packet.clone())
+                .await)
+                .is_ok()
+            {}
         }
         Ok(())
     }
@@ -319,8 +313,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             // receive packet
             let (size, addr) = try_continue!(
                 socket.recv_from(&mut buf).await,
-                "Error reading from network: {:?}",
-                err
+                "Error reading from network"
             );
             // see if we know this peer
             let mut peers = peers.write().await;

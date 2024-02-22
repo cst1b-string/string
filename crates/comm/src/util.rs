@@ -9,11 +9,11 @@ macro_rules! try_break {
             Err(_) => break,
         }
     };
-    ($e:expr,  $($arg:tt)*) => {
+    ($e:expr,  $msg:literal) => {
         match $e {
             Ok(e) => e,
             Err(err) => {
-                error!($($arg)*);
+                error!(concat!($msg, ": {:?}"), err);
                 break;
             }
         }
@@ -29,11 +29,11 @@ macro_rules! try_continue {
             Err(_) => continue,
         }
     };
-    ($e:expr, $($arg:tt)*) => {
+    ($e:expr, $msg:literal) => {
         match $e {
             Ok(e) => e,
             Err(err) => {
-                error!($($arg)*);
+                error!(concat!($msg, ": {:?}"), err);
                 continue;
             }
         }
@@ -49,11 +49,11 @@ macro_rules! maybe_break {
             None => break,
         }
     };
-    ($e:expr, $($arg:tt)*) => {
+    ($e:expr, $msg:literal) => {
         match $e {
             Some(e) => e,
             None => {
-                error!($($arg)*);
+                error!(concat!($msg, ": {:?}"), err);
                 break;
             }
         }
@@ -69,11 +69,11 @@ macro_rules! maybe_continue {
             None => continue,
         }
     };
-    ($e:expr, $($arg:tt)*) => {
+    ($e:expr, $msg:literal) => {
         match $e {
             Some(e) => e,
             None => {
-                error!($($arg)*);
+                error!(concat!($msg, ": {:?}"), err);
                 break;
             }
         }

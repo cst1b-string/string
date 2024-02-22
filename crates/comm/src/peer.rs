@@ -9,8 +9,8 @@ use crate::{
     try_break, try_continue,
 };
 use protocol::{
-    crypto, gossip, packet, try_decode_packet, try_encode_packet, try_verify_packet_sig,
-    MessageType, ProtocolPacket, ProtocolPacketType,
+    crypto, gossip, try_decode_packet, try_encode_packet, try_verify_packet_sig, MessageType,
+    ProtocolPacket, ProtocolPacketType,
 };
 use std::{
     cmp::Reverse,
@@ -163,7 +163,8 @@ impl Peer {
     }
 
     /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
-    /// For distributing gossip check Socket class instead
+    /// For distributing gossip check Socket class instead.
+    ///
     /// TODO: Sign the gossip packet's contents with our private key
     pub async fn send_gossip_single(
         &mut self,
@@ -176,7 +177,7 @@ impl Peer {
             message_type: Some(message),
         };
         // TODO: Sign internal
-        let gossip = packet::v1::packet::PacketType::PktGossip(gossip::v1::Gossip {
+        let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
                 signature: vec![],
                 signed_data: Some(internal),
@@ -330,11 +331,7 @@ fn start_peer_sender_worker(
 
             // encode packet
             trace!("encode packet: {:?}", packet);
-            let buf = try_continue!(
-                try_encode_packet(&packet),
-                "Failed to encode packet: {:?}",
-                &packet
-            );
+            let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
 
             // split packet into network packets and send
             for net_packet in buf
