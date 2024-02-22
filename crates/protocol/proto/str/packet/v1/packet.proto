@@ -2,12 +2,12 @@ syntax = "proto3";
 
 package str.packet.v1;
 
-message ExamplePacket {
-	string example = 1;
-}
+import "str/gossip/v1/gossip.proto";
+import "str/messages/v1/messages.proto";
 
 message Packet {
-	oneof packet {
-		ExamplePacket example = 1;
+	oneof packet_type {
+		str.gossip.v1.Gossip pkt_gossip = 1;
+		str.messages.v1.Message pkt_message = 2;
 	}
 }

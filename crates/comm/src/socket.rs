@@ -1,8 +1,8 @@
 //! Defines the UDP socket abstraction and first-layer packet format used for communication between peers.
 
 use std::{
-    cmp::Ordering,
-    collections::HashMap,
+    cmp::{self, Ordering},
+    collections::{hash_map, HashMap},
     io::{self, Cursor, Read, Write},
     net::SocketAddr,
     sync::Arc,
@@ -10,15 +10,20 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use protocol::{prost::DecodeError, try_decode_packet, ProtocolPacket};
+use protocol::{prost::DecodeError, try_decode_packet, MessageType, ProtocolPacket};
+use rand::{rngs::OsRng, seq::IteratorRandom};
 use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
-use tracing::{debug, span, trace};
+use tracing::{debug, error, span, trace};
 
-use crate::peer::{Peer, PeerError, PeerState};
+use crate::{
+    crypto::{Crypto, DoubleRatchet},
+    peer::{Peer, PeerError, PeerState},
+    try_continue,
+};
 
 /// The magic number used to identify packets sent over the network.
 pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
@@ -30,13 +35,20 @@ pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4 + 4;
 /// The maximum size of a UDP datagram.
 pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 
+/// Number of peers to send gossip to
+const GOSSIP_COUNT: usize = 3;
+
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
 pub struct Socket {
     /// The inner [UdpSocket] used for sending and receiving packets.
-    inner: Arc<UdpSocket>,
+    pub inner: Arc<UdpSocket>,
     /// A map of connections to other peers.
-    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    /// Crypto object, contains ratchets for other nodes
+    pub crypto: Arc<RwLock<Crypto>>,
+    /// Username used to identify this current node
+    pub username: String,
 }
 
 /// An enumeration of possible errors that can occur when working with [Socket].
@@ -63,6 +75,12 @@ pub enum SocketError {
     /// A peer operation failed.
     #[error("Failed to process peer operation")]
     PeerError(#[from] PeerError),
+    /// Trying to start a ratchet when it exists
+    #[error("Ratchet exists")]
+    RatchetExists,
+    /// Tried to send gossip, but 0 peers connected
+    #[error("No peer for gossip")]
+    NoPeer,
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
@@ -91,7 +109,7 @@ pub enum SocketPacketDecodeError {
 impl Socket {
     /// Create a new `Socket` that is bound to the given address. This method also
     /// starts the background tasks that handle sending and receiving packets.
-    pub async fn bind(addr: SocketAddr) -> Result<Self, SocketError> {
+    pub async fn bind(addr: SocketAddr, username: String) -> Result<Self, SocketError> {
         // bind socket
         let socket: Arc<_> = UdpSocket::bind(addr)
             .await
@@ -101,6 +119,8 @@ impl Socket {
         // create peers map
         let peers = Arc::new(RwLock::new(HashMap::new()));
 
+        let crypto = Arc::new(RwLock::new(Crypto::new()));
+
         // start the outbound worker
         span!(tracing::Level::INFO, "socket::outbound")
             .in_scope(|| start_outbound_worker(socket.clone(), peers.clone()));
@@ -108,6 +128,8 @@ impl Socket {
         Ok(Self {
             inner: socket,
             peers,
+            crypto,
+            username,
         })
     }
 
@@ -118,7 +140,14 @@ impl Socket {
         addr: SocketAddr,
         initiate: bool,
     ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
-        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(addr, initiate);
+        let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(
+            addr,
+            self.crypto.clone(),
+            self.peers.clone(),
+            self.username.clone(),
+            initiate,
+        );
+
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
         // spawn the inbound peer task
@@ -143,7 +172,7 @@ impl Socket {
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
         let connections = self.peers.read().await;
         if !connections.contains_key(&addr) {
-            return None;
+            None
         } else {
             let state = { *connections[&addr].state.read().await };
             Some(state)
@@ -163,6 +192,114 @@ impl Socket {
 
         Ok(())
     }
+
+    /// Selects at most 3 peers randomly from list of peers - should
+    /// probably employ round robin here.
+    pub async fn select_gossip_peers(
+        &self,
+        skip: Option<SocketAddr>,
+    ) -> Result<Vec<SocketAddr>, SocketError> {
+        let targets: Vec<_> = self
+            .peers
+            .read()
+            .await
+            .keys()
+            // skip if included
+            .filter(|addr| skip.map(|skip_addr| skip_addr != **addr).unwrap_or(true))
+            .cloned()
+            .choose_multiple(&mut OsRng, GOSSIP_COUNT);
+
+        // we have no targets!
+        if targets.is_empty() {
+            return Err(SocketError::NoPeer);
+        }
+
+        Ok(targets)
+    }
+
+    /// Sends non-encrypted message to a random group of peers
+    /// Use this to send key exchange messages
+    pub async fn send_gossip(
+        &self,
+        message: MessageType,
+        destination: String,
+    ) -> Result<(), SocketError> {
+        let gossip_targets = self.select_gossip_peers(None).await?;
+        for target in gossip_targets {
+            let mut peers = self.peers.write().await;
+            let target_peer = peers.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single(message.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
+        }
+        Ok(())
+    }
+
+    /// Sends encrypted packet to random group of peers
+    /// Use this to send a ProtocolPacket containing a PktMessage,
+    /// which contains the message data
+    pub async fn send_gossip_encrypted(
+        &self,
+        packet: ProtocolPacket,
+        peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+        destination: String,
+    ) -> Result<(), SocketError> {
+        let gossip_targets = self.select_gossip_peers(None).await?;
+        for target in gossip_targets {
+            let mut peers_write = peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_gossip_single_encrypted(packet.clone(), destination.clone())
+                .await)
+                .is_ok()
+            {}
+        }
+        Ok(())
+    }
+
+    /// Forwards a received gossip packet as is to a random group of peers
+    /// Internal use only for forwarding gossip packets not intended for us
+    pub async fn forward_gossip(
+        &self,
+        packet: ProtocolPacket,
+        skip: SocketAddr,
+    ) -> Result<(), SocketError> {
+        let gossip_targets = self.select_gossip_peers(Some(skip)).await?;
+        for target in gossip_targets {
+            let mut peers_write = self.peers.write().await;
+            let target_peer = peers_write.get_mut(&target);
+            if (target_peer
+                .expect("No such peer")
+                .send_packet(packet.clone())
+                .await)
+                .is_ok()
+            {}
+        }
+        Ok(())
+    }
+
+    /// Attempt to establish a DR ratchet with destination node
+    /// Since this is done by gossip, it may not succeed if the node is down
+    /// or inexistent
+    pub async fn start_dr(&mut self, destination: String) -> Result<(), SocketError> {
+        let mut crypto = self.crypto.write().await;
+        match crypto.ratchets.entry(destination.clone()) {
+            hash_map::Entry::Occupied(_) => Err(SocketError::RatchetExists),
+            hash_map::Entry::Vacant(entry) => {
+                let mut dr = DoubleRatchet::new_initiator();
+                let kex_msg = dr.generate_kex_message();
+                entry.insert(dr);
+                drop(crypto);
+                self.send_gossip(MessageType::KeyExchange(kex_msg), destination)
+                    .await?;
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Start the outbound network worker.
@@ -178,14 +315,10 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
             }
 
             // receive packet
-            let (size, addr) = match socket.recv_from(&mut buf).await {
-                Ok((size, addr)) => (size, addr),
-                Err(e) => {
-                    eprintln!("Error reading from network: {:?}", e);
-                    continue;
-                }
-            };
-
+            let (size, addr) = try_continue!(
+                socket.recv_from(&mut buf).await,
+                "Error reading from network"
+            );
             // see if we know this peer
             let mut peers = peers.write().await;
             let peer = match peers.get_mut(&addr) {
