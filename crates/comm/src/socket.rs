@@ -1,7 +1,7 @@
 //! Defines the UDP socket abstraction and first-layer packet format used for communication between peers.
 
 use std::{
-    cmp::{self, Ordering},
+    cmp::Ordering,
     collections::{hash_map, HashMap},
     io::{self, Cursor, Read, Write},
     net::SocketAddr,
