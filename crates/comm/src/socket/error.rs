@@ -1,5 +1,6 @@
 //! Defines error types for the [crate::socket] module.
 
+use protocol::prost::DecodeError;
 use thiserror::Error;
 
 use crate::peer::PeerError;
@@ -54,4 +55,7 @@ pub enum SocketPacketDecodeError {
     /// An IO operation failed.
     #[error("Encountered an IO error")]
     IoError(#[from] std::io::Error),
+    /// Packet decoding failed.
+    #[error("Failed to decode packet")]
+    DecodeFail(#[from] DecodeError),
 }

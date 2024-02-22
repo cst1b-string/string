@@ -259,7 +259,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
 
             // see if we know this peer
             let mut peers = peers.write().await;
-            let peer = maybe_continue!(peers.get_mut(&addr), "Unknown peer {:?}", addr);
+            let peer = maybe_continue!(peers.get_mut(&addr), "Unknown peer");
 
             // decode network packet
             let packet = try_continue!(SocketPacket::decode(&buf[..size]), "Error decoding packet");
