@@ -7,7 +7,7 @@ use std::{
 
 use protocol::{try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use crate::{
     maybe_break,
@@ -90,7 +90,10 @@ pub fn start_peer_receiver_worker(
                             let ack =
                                 SocketPacket::empty(SocketPacketType::Ack, packet.packet_number, 0);
                             // write to network
-                            try_break!(net_outbound_tx.send(ack).await);
+                            try_break!(
+                                net_outbound_tx.send(ack).await,
+                                "failed to send packet to network"
+                            );
                         }
                         SocketPacketType::SynAck => {
                             debug!(
