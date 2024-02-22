@@ -7,7 +7,7 @@ use std::{
 
 use protocol::{try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use crate::{
     maybe_break, maybe_continue,

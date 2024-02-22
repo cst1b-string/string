@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use protocol::{try_encode_packet, ProtocolPacket};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     maybe_break,
