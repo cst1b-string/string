@@ -9,7 +9,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 mod protocol;
-mod user_session;
+mod user_data;
 
 /// Context passed to the router during operations.
 struct RouterCtx {
