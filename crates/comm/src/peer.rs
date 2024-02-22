@@ -126,7 +126,7 @@ impl Peer {
 
         let crypto = Arc::new(RwLock::new(Crypto::new()));
         let packet_number = Arc::new(Mutex::new(0));
-        let packet_acks = Arc::new(RwLock::new(HashSet::new()));
+        let pending_acks = Arc::new(RwLock::new(HashSet::new()));
 
         span!(Level::TRACE, "peer::receiver", %remote_addr).in_scope(|| {
             start_peer_receiver_worker(
@@ -137,7 +137,7 @@ impl Peer {
                 remote_addr,
                 peers.clone(),
                 packet_number.clone(),
-                packet_acks.clone(),
+                pending_acks.clone(),
             )
         });
 
@@ -148,7 +148,7 @@ impl Peer {
                 app_outbound_rx,
                 crypto.clone(),
                 packet_number.clone(),
-                packet_acks.clone(),
+                pending_acks.clone(),
             )
         });
 
@@ -306,7 +306,7 @@ fn start_peer_sender_worker(
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
     crypto: Arc<RwLock<Crypto>>,
     packet_number: Arc<Mutex<u32>>,
-    packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
+    pending_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
 ) {
     tokio::task::spawn(async move {
         let mut syns_sent: u32 = 0;
@@ -349,7 +349,7 @@ fn start_peer_sender_worker(
 
             // these locks may cause some contention - investigate
             let mut packet_number = packet_number.lock().await;
-            let mut packet_acks_write = packet_acks.write().await;
+            let mut pending_acks_write = pending_acks.write().await;
 
             // split packet into network packets and send
             for net_packet in
@@ -368,13 +368,13 @@ fn start_peer_sender_worker(
                 match net_outbound_tx.send(net_packet.clone()).await {
                     Ok(_) => {
                         // add the packet to hashmap of packets that we don't have a ACK to
-                        packet_acks_write
+                        pending_acks_write
                             .insert((net_packet.packet_number, net_packet.chunk_number));
 
                         // start a task that will wait for an ACK for this packet
                         start_ack_timeout_worker(
                             state.clone(),
-                            packet_acks.clone(),
+                            pending_acks.clone(),
                             net_outbound_tx.clone(),
                             net_packet.clone(),
                         );
