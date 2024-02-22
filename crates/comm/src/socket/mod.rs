@@ -5,7 +5,6 @@ mod packet;
 
 use std::{
     collections::{hash_map::Entry, HashMap},
-    io::{Read, Write},
     net::SocketAddr,
     sync::Arc,
 };
@@ -25,9 +24,10 @@ use crate::{
     try_break, try_continue,
 };
 
-use self::{
-    error::SocketError,
-    packet::{SocketPacket, UDP_MAX_DATAGRAM_SIZE},
+// re-export types
+pub use self::error::{SocketError, SocketPacketDecodeError};
+pub use self::packet::{
+    SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
 
 /// Number of peers to send gossip to

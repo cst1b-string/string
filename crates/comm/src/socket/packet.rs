@@ -1,8 +1,11 @@
 //! Defines the [SocketPacket] type and related functionality.
 
-use std::{cmp::Ordering, io::Cursor};
+use std::{
+    cmp::Ordering,
+    io::{Cursor, Read, Write},
+};
 
-use byteorder::BigEndian;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use protocol::{prost::DecodeError, try_decode_packet, ProtocolPacket};
 
 use super::error::SocketPacketDecodeError;
