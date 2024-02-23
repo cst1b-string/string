@@ -2,6 +2,8 @@
 //!
 //! This crate contains the protocol definition for the string protocol.
 
+use std::io::{self, Read, Write};
+
 use prost::{DecodeError, EncodeError, Message};
 use thiserror::Error;
 
@@ -70,19 +72,46 @@ pub type ProtocolPacketType = packet::v1::packet::PacketType;
 /// A type alias for [crypto::v1::signed_packet_internal::MessageType], useful for disambiguating message types in Gossip packets
 pub type MessageType = crypto::v1::signed_packet_internal::MessageType;
 
+/// An error that can occur when decoding a packet.
+#[derive(Debug, Error)]
+pub enum PacketDecodeError {
+    #[error("failed to decode packet")]
+    DecodeError(#[from] DecodeError),
+    #[error("encountered an IO error while decoding packet")]
+    IoError(#[from] io::Error),
+}
+
+/// An error that can occur when encoding a packet.
+#[derive(Debug, Error)]
+pub enum PacketEncodeError {
+    #[error("failed to encode packet")]
+    EncodeError(#[from] EncodeError),
+    #[error("encountered an IO error while encoding packet")]
+    IoError(#[from] io::Error),
+}
+
 /// Attempt to decode a packet from the given buffer.
-pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, DecodeError>
+pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, PacketDecodeError>
 where
     Data: AsRef<[u8]>,
 {
-    packet::v1::Packet::decode(buf.as_ref())
+    // decompress data - generously allocate 2x the size of the compressed data
+    let mut decoder = flate2::read::GzDecoder::new(buf.as_ref());
+    let mut buf = Vec::with_capacity(buf.as_ref().len() * 2);
+    decoder.read_to_end(&mut buf)?;
+    // decode packet
+    Ok(packet::v1::Packet::decode(&*buf)?)
 }
 
 /// Attempt to encode a packet into a buffer.
-pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, EncodeError> {
+pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, PacketEncodeError> {
+    // encode packet
     let mut buf = Vec::new();
     packet.encode(&mut buf)?;
-    Ok(buf)
+    // compress data
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&buf)?;
+    Ok(encoder.finish()?)
 }
 
 #[derive(Error, Debug)]
