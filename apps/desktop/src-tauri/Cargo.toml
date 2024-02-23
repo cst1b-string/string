@@ -31,8 +31,8 @@ tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", br
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-comm = { package="string-comm", path = "../../../crates/comm" }
-prisma_orm = { path = "../../../crates/prisma_orm" }
+string-comm = { path = "../../../crates/comm" }
+cache-prisma = { path = "../../../crates/cache-prisma" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.

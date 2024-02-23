@@ -1,4 +1,4 @@
-//! # prisma
+//! # lighthouse-prisma
 //!
 //! This crate contains all the generated code for the Prisma client, allowing upstream services to interface
 //! with PostgreSQL in a type-safe and Rust-friendly manner.
@@ -14,5 +14,3 @@ pub use prisma::*;
 pub mod client {
     pub use prisma_client_rust::*;
 }
-
-// pub struct 

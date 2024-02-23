@@ -1,0 +1,22 @@
+datasource db {
+    provider = "postgresql"
+    url      = env("LIGHTHOUSE_DATABASE_URL")
+}
+
+generator client {
+    provider = "cargo prisma"
+    output   = "../src/prisma.rs"
+}
+
+model Channel {
+    key       Bytes             @id
+    endpoints ChannelEndpoint[]
+}
+
+model ChannelEndpoint {
+    id         String   @id @default(uuid()) @db.Uuid
+    channel    Channel  @relation(fields: [channelKey], references: [key])
+    channelKey Bytes
+    endpoint   String   @db.Inet
+    lastUpdate DateTime
+}
