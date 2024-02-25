@@ -84,7 +84,7 @@ pub fn start_peer_sender_worker(
                         .expect("failed to create packet")
                     })
             {
-                match net_outbound_tx.send(net_packet.clone()).await {
+                match net_outbound_tx.send(net_packet).await {
                     Ok(_) => {
                         // add the packet to hashmap of packets that we don't have a ACK to
                         pending_acks_write
@@ -95,7 +95,7 @@ pub fn start_peer_sender_worker(
                             state.clone(),
                             pending_acks.clone(),
                             net_outbound_tx.clone(),
-                            net_packet.clone(),
+                            net_packet,
                         );
                     }
                     Err(_) => break,

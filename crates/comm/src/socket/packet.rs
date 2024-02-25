@@ -2,11 +2,11 @@
 
 use std::{
     cmp::Ordering,
-    io::{Cursor, Read, Write},
+    io::{self, Cursor, Read, Write},
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{read::GzDecoder};
 use protocol::{try_decode_packet, ProtocolPacket};
 
 use super::error::SocketPacketDecodeError;
@@ -206,9 +206,9 @@ impl SocketPacket {
 
     /// Decompress the data.
     pub fn decompress(&self) -> std::io::Result<Vec<u8>> {
-        let mut data = vec![0; self.uncompressed_data_length as usize];
-        let mut gz_decoder = GzDecoder::new(self.compressed_data.as_slice());
-        gz_decoder.read_exact(&mut data)?;
+        let mut data = Vec::new();
+        let mut gz_decoder = GzDecoder::new(self.data.as_slice());
+        gz_decoder.read_to_end(&mut data)?;
         Ok(data)
     }
 }

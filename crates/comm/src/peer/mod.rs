@@ -13,6 +13,7 @@ use crate::{
 use protocol::{
     crypto, gossip, try_decode_packet, try_encode_packet, MessageType, ProtocolPacket,
     ProtocolPacketType,
+    PacketDecodeError, PacketEncodeError
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -89,10 +90,10 @@ pub enum PeerError {
     ApplicationSendFail(#[from] SendError<ProtocolPacket>),
     // Failed to decode decrypted packet
     #[error("Failed to decode decrypted packet")]
-    DecodeFail(#[from] protocol::prost::DecodeError),
+    DecodeFail(#[from] PacketDecodeError),
     // Failed to encode packet for encryption
     #[error("Failed to encode packet for encryption")]
-    EncodeFail(#[from] protocol::prost::EncodeError),
+    EncodeFail(#[from] PacketEncodeError),
     // Failure in double ratchet
     #[error("Failure in double ratchet")]
     DRFail(#[from] DoubleRatchetError),

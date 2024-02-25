@@ -40,7 +40,7 @@ pub fn start_ack_timeout_worker(
                         break;
                     }
                     // retransmit
-                    try_break!(net_outbound_tx.send(net_packet.clone()).await);
+                    try_break!(net_outbound_tx.send(net_packet).await);
                 }
             } => {}
         }
