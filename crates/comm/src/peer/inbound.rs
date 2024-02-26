@@ -171,8 +171,8 @@ pub fn start_peer_receiver_worker(
                                 let signed_packet = gossip.packet.as_ref().unwrap();
 
                                 let forward = {
-                                    let mut peers = peers.write().await;
-                                    let peer = match peers.get_mut(&remote_addr) {
+                                    let mut peers_write = peers.write().await;
+                                    let peer = match peers_write.get_mut(&remote_addr) {
                                         Some(p) => p,
                                         None => {
                                             continue;
