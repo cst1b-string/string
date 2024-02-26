@@ -5,7 +5,7 @@
 
 /// The generated `prisma` module, which exports the generated Prisma client and its associated types.
 #[allow(clippy::all, unused_imports)]
-mod prisma;
+pub mod prisma;
 
 /// Re-export of the generated Prisma client.
 pub use prisma::*;
@@ -14,3 +14,5 @@ pub use prisma::*;
 pub mod client {
     pub use prisma_client_rust::*;
 }
+
+// pub struct 

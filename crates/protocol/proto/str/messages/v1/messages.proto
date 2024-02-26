@@ -2,12 +2,15 @@ syntax = "proto3";
 
 package str.messages.v1;
 
+import "google/protobuf/timestamp.proto";
+
 message Message {
 	string id = 1;
 	string channel_id = 2;
 	string username = 3;
 	string content = 4;
 	repeated MessageAttachment attachments = 5;
+	google.protobuf.Timestamp time_sent = 6;
 }
 
 message MessageAttachment {

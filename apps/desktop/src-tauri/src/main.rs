@@ -9,10 +9,12 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 mod protocol;
+mod user_session;
 
 /// Context passed to the router during operations.
 struct RouterCtx {
     socket: Socket,
+	user_session: UserSession
 }
 
 /// Thread-safe reference to the router context.
@@ -37,6 +39,9 @@ async fn main() {
         .query("version", |t| {
             t(|_: Ctx, _: ()| env!("CARGO_PKG_VERSION").to_string())
         })
+		// .query("", |t| {
+		// 	t(|_: Ctx, _: ()| )
+		// })
         .config(Config::new().export_ts_bindings("../../src/bindings.ts".to_string()))
         .build();
 
@@ -50,7 +55,7 @@ async fn main() {
         .expect("failed to bind socket");
 
     // create context
-    let ctx = Arc::new(RouterCtx { socket });
+    let ctx = Arc::new(RouterCtx { socket, user_session});
 
     // build tauri app
     tauri::Builder::default()
