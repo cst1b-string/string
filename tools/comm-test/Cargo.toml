@@ -12,3 +12,6 @@ string-protocol = { path = "../../crates/protocol" }
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+pgp = "0.11.0"
+smallvec = "1.13.1"
+

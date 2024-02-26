@@ -44,6 +44,7 @@ pub struct Socket {
     pub crypto: Arc<RwLock<Crypto>>,
     /// Username used to identify this current node
     pub username: String,
+    /// Channel used to send gossip
     pub gossip_tx: mpsc::Sender<Gossip>,
 }
 
