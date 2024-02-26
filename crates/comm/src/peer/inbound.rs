@@ -191,10 +191,9 @@ pub fn start_peer_receiver_worker(
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {
-                                    drop(peers);
-                                    let _ =
-                                        Socket::forward_gossip(packet, peers.clone(), remote_addr)
-                                            .await;
+                                    // let _ =
+                                    //     Socket::forward_gossip(packet, peers.clone(), remote_addr)
+                                    //         .await;
                                 }
                             }
                             Some(_) => {}

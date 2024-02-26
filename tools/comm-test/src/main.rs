@@ -1,8 +1,8 @@
 use clap::Parser;
-use comm::{peer::PeerState, Socket};
-use protocol::{messages, ProtocolPacket, ProtocolPacketType};
 use std::io;
 use std::{net::SocketAddr, time::Duration};
+use string_comm::{peer::PeerState, Socket};
+use string_protocol::{messages, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;

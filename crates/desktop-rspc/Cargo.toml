@@ -1,0 +1,20 @@
+[package]
+name = "desktop-rspc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+
+rspc = { version = "0.1", features = ["tauri"] }
+
+string-comm = { path = "../comm" }
+string-protocol = { path = "../protocol" }
+
+[lib]
+name = "desktop_rpsc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rspc-exporter"
+path = "bin/rspc-exporter.rs"
