@@ -1,6 +1,6 @@
-use std::{collections::HashMap, default::Default};
 use comm::{peer::PeerError, Peer};
 use prisma_orm::prisma::*;
+use std::{collections::HashMap, default::Default};
 
 /// Contains the chat_history a user has, their settings
 struct UserSession {
@@ -18,6 +18,6 @@ impl UserSession {
     }
 
     pub fn get_dark_mode(&self) -> Option<settings::Data> {
-        self.client.settings().find_unique(is_dark_mode
+        self.client.settings().find_unique(is_dark_mode)
     }
 }
