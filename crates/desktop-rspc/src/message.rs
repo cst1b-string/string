@@ -47,7 +47,21 @@ pub async fn list_messages(
 }
 
 /// Send a message to the network.
-async fn send_message(ctx: Ctx, message: String) -> Result<(), rspc::Error> {
+async fn send_message(ctx: Ctx, content: String) -> Result<(), rspc::Error> {
+    // append the message to the cache
+    ctx.cache
+        .message()
+        .create(content, "todo".into(), Utc::now().fixed_offset(), vec![])
+        .exec()
+        .await
+        .map_err(|err| {
+            rspc::Error::with_cause(
+                ErrorCode::InternalServerError,
+                "failed to insert into cache".into(),
+                err,
+            )
+        })?;
+
     // TODO: send the message
     Ok(())
 }
