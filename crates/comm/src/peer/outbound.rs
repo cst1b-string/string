@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use protocol::{try_encode_packet, ProtocolPacket};
+use string_protocol::{try_encode_packet, ProtocolPacket};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace, warn};
 
@@ -84,7 +84,7 @@ pub fn start_peer_sender_worker(
                         .expect("failed to create packet")
                     })
             {
-                match net_outbound_tx.send(net_packet).await {
+                match net_outbound_tx.send(net_packet.clone()).await {
                     Ok(_) => {
                         // add the packet to hashmap of packets that we don't have a ACK to
                         pending_acks_write

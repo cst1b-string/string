@@ -10,16 +10,15 @@ use crate::{
     crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
     socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
-use protocol::{
-    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, ProtocolPacket,
-    ProtocolPacketType,
-    PacketDecodeError, PacketEncodeError
-};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::SocketAddr,
     sync::Arc,
+};
+use string_protocol::{
+    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, PacketDecodeError,
+    PacketEncodeError, ProtocolPacket, ProtocolPacketType,
 };
 use thiserror::Error;
 use tokio::sync::{

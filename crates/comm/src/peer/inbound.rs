@@ -8,7 +8,9 @@ use std::{
     sync::Arc,
 };
 
-use protocol::{try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType};
+use string_protocol::{
+    try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType,
+};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace};
 
@@ -169,8 +171,8 @@ pub fn start_peer_receiver_worker(
                                 let signed_packet = gossip.packet.as_ref().unwrap();
 
                                 let forward = {
-                                    let mut peers = peers.write().await;
-                                    let peer = match peers.get_mut(&remote_addr) {
+                                    let mut peers_write = peers.write().await;
+                                    let peer = match peers_write.get_mut(&remote_addr) {
                                         Some(p) => p,
                                         None => {
                                             continue;
@@ -191,10 +193,9 @@ pub fn start_peer_receiver_worker(
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {
-                                    drop(peers);
-                                    let _ =
-                                        Socket::forward_gossip(packet, peers.clone(), remote_addr)
-                                            .await;
+                                    // let _ =
+                                    //     Socket::forward_gossip(packet, peers.clone(), remote_addr)
+                                    //         .await;
                                 }
                             }
                             Some(_) => {}

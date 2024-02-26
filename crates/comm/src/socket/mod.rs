@@ -9,8 +9,8 @@ use std::{
     sync::Arc,
 };
 
-use protocol::{MessageType, ProtocolPacket};
 use rand::{rngs::OsRng, seq::IteratorRandom};
+use string_protocol::{MessageType, ProtocolPacket};
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
