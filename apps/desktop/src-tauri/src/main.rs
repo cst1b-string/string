@@ -1,14 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Arc;
-
+use desktop_rspc::Context;
 use string_comm::{Socket, DEFAULT_PORT};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-mod protocol;
-mod user_session;
 
 #[tokio::main]
 async fn main() {
@@ -31,15 +27,22 @@ async fn main() {
         "Launching socket listener on {}:{}",
         "127.0.0.1", DEFAULT_PORT
     );
-    let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into())
+    let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into(), "desktop".into())
         .await
         .expect("failed to bind socket");
 
+    // create cache client
+    info!("Creating cache client...");
+    let cache = cache_prisma::new_client()
+        .await
+        .expect("failed to create cache client");
+
     // create context
-    let ctx = Arc::new(RouterCtx {
-        socket,
-        user_session,
-    });
+    let ctx = desktop_rspc::Ctx::new(
+        Context::from_socket(socket)
+            .await
+            .expect("failed to create context"),
+    );
 
     // build tauri app
     tauri::Builder::default()

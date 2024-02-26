@@ -2,7 +2,13 @@
 
 export type Procedures = {
     queries: 
-        { key: "version", input: never, result: string },
-    mutations: never,
+        { key: "settings.theme", input: never, result: Theme },
+    mutations: 
+        { key: "settings.theme", input: Theme, result: null },
     subscriptions: never
 };
+
+/**
+ * The theme of the application.
+ */
+export type Theme = "Light" | "Dark"

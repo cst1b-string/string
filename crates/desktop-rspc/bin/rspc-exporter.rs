@@ -1,4 +1,4 @@
-use desktop_rpsc::build_router_with_bindings;
+use desktop_rspc::build_router_with_bindings;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

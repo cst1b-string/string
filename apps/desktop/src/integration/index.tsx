@@ -45,7 +45,11 @@ export const IntegrationProvider: React.FC<React.PropsWithChildren> = ({ childre
 	const integration = useMemo(() => Integration.instance, []);
 	return (
 		<IntegrationContext.Provider value={integration}>
-			<integration.rspc.Provider client={integration.client} queryClient={integration.queryClient}>
+			<integration.rspc.Provider
+				client={integration.client}
+				//@ts-expect-error Something is wrong with RSPC's types
+				queryClient={integration.queryClient}
+			>
 				<>{children}</>
 			</integration.rspc.Provider>
 		</IntegrationContext.Provider>

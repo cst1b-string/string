@@ -125,7 +125,7 @@ async fn main() {
     // create app router
     let app = Router::new()
         .route("/", get(report_status))
-        .route("/endpoints", post(register_endpoint))
+        // .route("/endpoints", post(register_endpoint))
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_error))
