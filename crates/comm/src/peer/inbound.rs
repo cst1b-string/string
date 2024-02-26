@@ -16,8 +16,8 @@ use tracing::{debug, error, trace};
 
 use crate::{
     maybe_break,
-    socket::{SocketPacket, SocketPacketType},
-    try_break, try_continue, Peer, Socket,
+    socket::{SocketPacket, SocketPacketType, Gossip, GossipAction},
+    try_break, try_continue, Peer,
 };
 
 use super::PeerState;
@@ -31,8 +31,9 @@ pub fn start_peer_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     remote_addr: SocketAddr,
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    packet_number: Arc<Mutex<u32>>,
+    _packet_number: Arc<Mutex<u32>>,
     packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
+    gossip_tx: mpsc::Sender<Gossip>,
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
@@ -154,12 +155,12 @@ pub fn start_peer_receiver_worker(
                             Err(_) => continue,
                         };
 
-                        if current_state == PeerState::Established {
-                            // clear queue - return early to avoid lots of nesting
-                            debug!("clear packet queue");
-                            packet_queue.clear();
-                            continue;
-                        }
+                        // if current_state == PeerState::Established {
+                        //     // clear queue - return early to avoid lots of nesting
+                        //     debug!("clear packet queue");
+                        //     packet_queue.clear();
+                        //     continue;
+                        // }
 
                         match packet.packet_type {
                             Some(ProtocolPacketType::PktGossip(ref gossip)) => {
@@ -193,9 +194,15 @@ pub fn start_peer_receiver_worker(
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {
-                                    // let _ =
-                                    //     Socket::forward_gossip(packet, peers.clone(), remote_addr)
-                                    //         .await;
+                                    debug!("going to forward packet");
+                                    let _ =
+                                    gossip_tx.send(Gossip {
+                                        action: GossipAction::Forward,
+                                        addr: Some(remote_addr),
+                                        packet: Some(packet),
+                                        message: None,
+                                        dest: None
+                                    }).await;
                                 }
                             }
                             Some(_) => {}

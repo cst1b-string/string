@@ -134,9 +134,8 @@ async fn main() {
                             let packet = ProtocolPacket {
                                 packet_type: Some(ProtocolPacketType::PktMessage(message)),
                             };
-                            let _ = Socket::send_gossip_encrypted(
+                            let _ = socket.send_gossip_encrypted(
                                 packet,
-                                socket.peers.clone(),
                                 destination.to_string(),
                             )
                             .await;

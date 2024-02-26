@@ -8,7 +8,7 @@ mod outbound;
 
 use crate::{
     crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
-    socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
+    socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -26,7 +26,7 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-use tracing::{error, span, warn, Level};
+use tracing::{error, span, warn, debug, Level};
 
 use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
 
@@ -106,6 +106,7 @@ impl Peer {
         crypto: Arc<RwLock<Crypto>>,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         username: String,
+        gossip_tx: mpsc::Sender<Gossip>,
         initiate: bool,
     ) -> (
         Self,
@@ -126,7 +127,6 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
-        let crypto = Arc::new(RwLock::new(Crypto::new()));
         let packet_number = Arc::new(Mutex::new(0));
         let pending_acks = Arc::new(RwLock::new(HashSet::new()));
 
@@ -140,6 +140,7 @@ impl Peer {
                 peers.clone(),
                 packet_number.clone(),
                 pending_acks.clone(),
+                gossip_tx.clone(),
             )
         });
 
@@ -246,6 +247,7 @@ impl Peer {
     ) -> Result<bool, PeerError> {
         let signed_data = signed_packet.signed_data.unwrap();
         let mut forward = false;
+        debug!("dispatching gossip {:?}", signed_data.clone());
         if signed_data.destination == self.username {
             let source = signed_data.source;
             match signed_data.message_type {

@@ -91,7 +91,7 @@ pub enum PacketEncodeError {
 }
 
 /// Attempt to decode a packet from the given buffer.
-pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, PacketDecodeError>
+pub fn try_decode_packet<Data>(buf: Data) -> Result<ProtocolPacket, PacketDecodeError>
 where
     Data: AsRef<[u8]>,
 {
@@ -104,7 +104,7 @@ where
 }
 
 /// Attempt to encode a packet into a buffer.
-pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, PacketEncodeError> {
+pub fn try_encode_packet(packet: &ProtocolPacket) -> Result<Vec<u8>, PacketEncodeError> {
     // encode packet
     let mut buf = Vec::new();
     packet.encode(&mut buf)?;
