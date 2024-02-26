@@ -9,32 +9,8 @@ generator client {
 }
 
 model Message {
-    id       Int      @id @default(autoincrement())
-    content  String
-    username String
-    timeSent DateTime
-    Peer     Peer?    @relation(fields: [peerId], references: [id])
-    peerId   Int?
-}
-
-model Peer {
-    id       Int       @id @default(autoincrement())
-    messages Message[]
-    user     User?     @relation(fields: [user_id], references: [id])
-    user_id  Int?
-}
-
-model Settings {
-    id         Int     @id @default(autoincrement())
-    isDarkMode Boolean
-    User       User?
-}
-
-model User {
-    id         Int      @id @default(autoincrement())
-    name       String
-    setting    Settings @relation(fields: [settingsId], references: [id])
-    peers      Peer[]
-    settingsId Int      @unique
-    // maybe put personal description / bio as well if we have time?
+    id        Int      @id @default(autoincrement())
+    content   String
+    author    String
+    timestamp DateTime
 }

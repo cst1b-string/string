@@ -1,8 +1,11 @@
-mod cache;
+//! Defines the RSPC router for the desktop application.
+
+mod message;
 mod settings;
 
 use std::{path::Path, sync::Arc};
 
+use message::attach_message_queries;
 use rspc::{Config, Router};
 use settings::{attach_settings_queries, SettingsContext};
 use string_comm::Socket;
@@ -58,7 +61,10 @@ fn build_router_with<P: AsRef<Path>>(bindings: Option<P>) -> Router<Ctx> {
         None => Config::new(),
     };
     let builder = Router::<Ctx>::new().config(config);
+
+    // attach queries
     let builder = attach_settings_queries(builder);
+    let builder = attach_message_queries(builder);
 
     builder.build()
 }

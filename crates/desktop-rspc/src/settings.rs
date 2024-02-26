@@ -1,3 +1,5 @@
+//! Defines queries that interact with the application settings and file system.
+
 use std::path::Path;
 
 use rspc::{RouterBuilder, Type};
@@ -71,15 +73,17 @@ pub fn attach_settings_queries<TMeta: Send>(
     builder: RouterBuilder<Ctx, TMeta>,
 ) -> RouterBuilder<Ctx, TMeta> {
     builder
-        // read theme
-        .query("settings.theme", |t| {
-            t(|ctx, _: ()| async move { Ok(ctx.settings_ctx.settings.read().await.theme) })
-        })
-        // write theme
-        .mutation("settings.theme", |t| {
-            t(|ctx, theme: Theme| async move {
-                ctx.settings_ctx.settings.write().await.theme = theme;
-                Ok(())
-            })
-        })
+        .query("settings.theme", |t| t(get_settings_theme))
+        .mutation("settings.theme", |t| t(update_settings_theme))
+}
+
+/// Get the theme from the settings.
+async fn get_settings_theme(ctx: Ctx, _: ()) -> Result<Theme, rspc::Error> {
+    Ok(ctx.settings_ctx.settings.read().await.theme)
+}
+
+/// Update the theme to the settings.
+async fn update_settings_theme(ctx: Ctx, theme: Theme) -> Result<(), rspc::Error> {
+    ctx.settings_ctx.settings.write().await.theme = theme;
+    Ok(())
 }
