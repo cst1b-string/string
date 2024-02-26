@@ -11,9 +11,8 @@ use crate::{
     socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
 use protocol::{
-    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, ProtocolPacket,
-    ProtocolPacketType,
-    PacketDecodeError, PacketEncodeError
+    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, PacketDecodeError,
+    PacketEncodeError, ProtocolPacket, ProtocolPacketType,
 };
 use std::{
     collections::{HashMap, HashSet},
