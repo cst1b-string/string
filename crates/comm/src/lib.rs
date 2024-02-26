@@ -3,7 +3,6 @@
 //! This crate contains the communication code for string
 
 pub mod crypto;
-pub mod node;
 pub mod peer;
 pub mod socket;
 pub mod util;
