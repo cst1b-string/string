@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true }
 
+async-stream = "0.3"
 rspc = { version = "0.1", features = ["tauri"] }
 
 string-comm = { path = "../comm" }

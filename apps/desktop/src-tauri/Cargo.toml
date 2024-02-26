@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 string-comm = { path = "../../../crates/comm" }
 cache-prisma = { path = "../../../crates/cache-prisma" }
+desktop-rspc = { path = "../../../crates/desktop-rspc" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.

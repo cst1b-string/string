@@ -11,15 +11,6 @@ use tracing_subscriber::EnvFilter;
 mod protocol;
 mod user_session;
 
-/// Context passed to the router during operations.
-struct RouterCtx {
-    socket: Socket,
-	user_session: UserSession
-}
-
-/// Thread-safe reference to the router context.
-type Ctx = Arc<RouterCtx>;
-
 #[tokio::main]
 async fn main() {
     // intialize logging
@@ -34,16 +25,7 @@ async fn main() {
     );
 
     // rspc router for communicating with frontend
-    let router = Router::<Ctx>::new()
-        // version query
-        .query("version", |t| {
-            t(|_: Ctx, _: ()| env!("CARGO_PKG_VERSION").to_string())
-        })
-		// .query("", |t| {
-		// 	t(|_: Ctx, _: ()| )
-		// })
-        .config(Config::new().export_ts_bindings("../../src/bindings.ts".to_string()))
-        .build();
+    let router = desktop_rspc::build_router();
 
     // bind to socket
     info!(
@@ -55,7 +37,10 @@ async fn main() {
         .expect("failed to bind socket");
 
     // create context
-    let ctx = Arc::new(RouterCtx { socket, user_session});
+    let ctx = Arc::new(RouterCtx {
+        socket,
+        user_session,
+    });
 
     // build tauri app
     tauri::Builder::default()

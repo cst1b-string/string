@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rspc::{Config, Router};
 
@@ -22,7 +22,8 @@ fn build_router_with<P: AsRef<Path>>(bindings: Option<P>) -> Router<Context> {
         None => Config::new(),
     };
     Router::<Context>::new()
-        .query("version", |t| t(|ctx, input: ()| env!("CARGO_PKG_VERSION")))
+        .query("version", |t| t(|_, _: ()| env!("CARGO_PKG_VERSION")))
+        .subscription("messages", |t| t(|ctx, _: ()| async_stream::stream! {}))
         .config(config)
         .build()
 }
