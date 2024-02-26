@@ -3,9 +3,10 @@
 
 use std::sync::Arc;
 
-use comm::{Socket, DEFAULT_PORT};
-use log::info;
 use rspc::{Config, Router};
+use string_comm::{Socket, DEFAULT_PORT};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 mod protocol;
 
@@ -20,7 +21,10 @@ type Ctx = Arc<RouterCtx>;
 #[tokio::main]
 async fn main() {
     // intialize logging
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .pretty()
+        .init();
     info!(
         "Starting {} v{}",
         env!("CARGO_PKG_NAME"),
@@ -37,10 +41,9 @@ async fn main() {
         .build();
 
     // bind to socket
-    log::info!(
+    info!(
         "Launching socket listener on {}:{}",
-        "127.0.0.1",
-        DEFAULT_PORT
+        "127.0.0.1", DEFAULT_PORT
     );
     let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into())
         .await

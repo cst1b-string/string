@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace=  true }
+tokio = { workspace = true }
 
-comm = { path = "../../crates/comm" }
-protocol = { path = "../../crates/protocol" }
+string-comm = { path = "../../crates/comm" }
+string-protocol = { path = "../../crates/protocol" }
 
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"

@@ -1,11 +1,18 @@
 [package]
-name = "app"
+name = "string-app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
-default-run = "app"
+description = "Native application for demonstrating the String protocol."
+authors = [
+	"Amaan Hamza",
+	"Sam Forbes",
+	"David Murray",
+	"Skye Elliot",
+	"Heidar Anwari",
+	"Yichen Chai",
+]
+license = "GNU AGPLv3"
+repository = "https://github.com/cst1b-string/string"
+default-run = "string-app"
 edition = "2021"
 rust-version = "1.60"
 
@@ -17,14 +24,15 @@ tauri-build = { version = "1.5.1", features = [] }
 serde = { workspace = true }
 tokio = { workspace = true }
 
-comm = { path = "../../../crates/comm" }
-
-env_logger = "0.11"
-log = "0.4"
 rspc = { version = "0.1", features = ["tauri"] }
 serde_json = "1.0"
 tauri = { version = "1.5.4", features = [] }
 tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+string-comm = { path = "../../../crates/comm" }
+
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.
