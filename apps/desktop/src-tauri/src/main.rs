@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use rspc::{Config, Router};
 use string_comm::{Socket, DEFAULT_PORT};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
