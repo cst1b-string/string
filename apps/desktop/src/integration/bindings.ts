@@ -2,11 +2,20 @@
 
 export type Procedures = {
     queries: 
+        { key: "message.list", input: ListMessageArgs, result: Message[] } | 
         { key: "settings.theme", input: never, result: Theme },
     mutations: 
+        { key: "message.send", input: string, result: null } | 
         { key: "settings.theme", input: Theme, result: null },
     subscriptions: never
 };
+
+/**
+ * Arguments for the list messages query.
+ */
+export type ListMessageArgs = { after: number | null }
+
+export type Message = { id: number; content: string; author: string; timestamp: string }
 
 /**
  * The theme of the application.
