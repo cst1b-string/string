@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 use crate::peer::PeerError;
-use protocol::PacketDecodeError;
+use string_protocol::PacketDecodeError;
 
 /// An enumeration of possible errors that can occur when working with [Socket].
 #[derive(Error, Debug)]
@@ -25,7 +25,7 @@ pub enum SocketError {
     IoError(#[from] std::io::Error),
     /// A packet failed to encode.
     #[error("Failed to encode packet")]
-    EncodeFail(#[from] protocol::prost::EncodeError),
+    EncodeFail(#[from] string_protocol::PacketEncodeError),
     /// A peer operation failed.
     #[error("Failed to process peer operation")]
     PeerError(#[from] PeerError),

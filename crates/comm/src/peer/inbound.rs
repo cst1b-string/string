@@ -8,7 +8,9 @@ use std::{
     sync::Arc,
 };
 
-use protocol::{try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType};
+use string_protocol::{
+    try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType,
+};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace};
 

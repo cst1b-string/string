@@ -2,9 +2,9 @@
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use double_ratchet_rs::{Header, Ratchet};
-use protocol::crypto;
 use rand::rngs::OsRng;
 use std::{collections::HashMap, fmt, io::Cursor};
+use string_protocol::crypto;
 use thiserror::Error;
 use tracing::debug;
 use x25519_dalek::{PublicKey, StaticSecret};

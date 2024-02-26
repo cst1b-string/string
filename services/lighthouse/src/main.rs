@@ -9,7 +9,7 @@ use axum::{
     BoxError, Extension, Json, Router,
 };
 use base64::prelude::*;
-use prisma::PrismaClient;
+use lighthouse_prisma::PrismaClient;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{net::TcpListener, sync::RwLock};
@@ -24,7 +24,7 @@ enum LighthouseError {
     #[error("failed to decode channel key")]
     KeyDecodeError(#[from] base64::DecodeError),
     #[error("failed to query database")]
-    QueryError(#[from] prisma::client::queries::QueryError),
+    QueryError(#[from] lighthouse_prisma::client::queries::QueryError),
 }
 
 impl IntoResponse for LighthouseError {
@@ -72,8 +72,8 @@ async fn register_endpoint(
     // upsert channel entry
     db.channel()
         .upsert(
-            prisma::channel::key::equals(key.clone()),
-            prisma::channel::create(key.clone(), vec![]),
+            lighthouse_prisma::channel::key::equals(key.clone()),
+            lighthouse_prisma::channel::create(key.clone(), vec![]),
             vec![],
         )
         .exec()
@@ -81,7 +81,7 @@ async fn register_endpoint(
 
     // connect endpoint
     db.channel_endpoint().create(
-        prisma::channel::key::equals(key.clone()),
+        lighthouse_prisma::channel::key::equals(key.clone()),
         addr.ip().to_string(),
         chrono::Utc::now().fixed_offset(),
         vec![],
@@ -115,7 +115,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     // initialise prisma
-    let prisma = prisma::new_client()
+    let prisma = lighthouse_prisma::new_client()
         .await
         .expect("failed to create database client");
 

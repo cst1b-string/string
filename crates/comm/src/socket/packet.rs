@@ -6,8 +6,8 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use flate2::{read::GzDecoder};
-use protocol::{try_decode_packet, ProtocolPacket};
+use flate2::read::GzDecoder;
+use string_protocol::{try_decode_packet, ProtocolPacket};
 
 use super::error::SocketPacketDecodeError;
 
@@ -30,6 +30,7 @@ pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
 /// - 4 bytes: Length of the data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
+#[derive(Debug, Clone)]
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,
