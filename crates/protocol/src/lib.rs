@@ -121,28 +121,3 @@ pub fn try_encode_internal_packet(packet: &crypto::v1::SignedPacketInternal) -> 
     packet.encode(&mut buf)?;
     Ok(buf)
 }
-
-#[derive(Error, Debug)]
-pub enum SignatureError {
-    #[error("Invalid signature")]
-    SignatureFail,
-    #[error("Missing signed data")]
-    MissingData,
-    /// A packet failed to encode.
-    #[error("Failed to encode packet")]
-    EncodeFail(#[from] EncodeError),
-}
-
-pub fn try_verify_packet_sig(
-    signed: &crypto::v1::SignedPacket,
-) -> Result<&crypto::v1::SignedPacket, SignatureError> {
-    let mut buf = Vec::new();
-    match signed.signed_data.clone() {
-        Some(data) => {
-            data.encode(&mut buf)?;
-            // TODO: add signature verification code
-            Ok(signed)
-        }
-        None => Err(SignatureError::MissingData),
-    }
-}

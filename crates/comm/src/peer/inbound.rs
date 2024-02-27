@@ -9,7 +9,7 @@ use std::{
 };
 
 use string_protocol::{
-    try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType,
+    try_decode_packet, ProtocolPacket, ProtocolPacketType,
 };
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace};
@@ -89,7 +89,7 @@ pub fn start_peer_receiver_worker(
                                         continue;
                                     }
                                 };
-                                let _ = peer.send_cert().await;
+                                let _ = peer.send_pubkey().await;
                             }
                         }
                         SocketPacketType::Heartbeat
@@ -126,7 +126,7 @@ pub fn start_peer_receiver_worker(
                                         continue;
                                     }
                                 };
-                                let _ = peer.send_cert().await;
+                                let _ = peer.send_pubkey().await;
                             }
                         }
                         SocketPacketType::Heartbeat
@@ -201,16 +201,15 @@ pub fn start_peer_receiver_worker(
                                     };
 
                                     // Verify signature on packet
-                                    let signed_packet =
-                                        try_continue!(try_verify_packet_sig(&signed_packet));
+                                    // let signed_packet =
+                                    //     try_continue!(try_verify_packet_sig(&signed_packet));
 
                                     // Dispatch gossip to respective code if its for us...
-                                    peer.dispatch_gossip(
+                                    try_continue!(peer.dispatch_gossip(
                                         signed_packet.clone(),
                                         app_inbound_tx.clone(),
                                     )
-                                    .await
-                                    .unwrap()
+                                    .await)
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {

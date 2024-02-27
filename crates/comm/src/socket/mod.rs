@@ -115,7 +115,7 @@ impl Socket {
             return Err(SocketError::CertError);
         }
 
-        let username = secret_key.details.users[0].id.to_string();
+        let username = Crypto::get_pubkey_username(secret_key.into());
 
         Ok(Self {
             inner: socket,

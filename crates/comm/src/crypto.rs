@@ -19,11 +19,13 @@ use pgp::{
         SignedPublicKey
     },
     packet::{KeyFlags, UserAttribute, UserId},
-    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    types::{mpi, Mpi, KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
     crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
-    Deserializable
+    Deserializable,
+    ser::Serialize
 };
 use sha2::{Sha256, Digest};
+use nom::combinator::map;
 
 #[derive(Error, Debug)]
 pub enum DoubleRatchetError {
@@ -36,6 +38,16 @@ pub enum DoubleRatchetError {
     // Currently generic, todo make more specific
     #[error("Ciphertext is bad")]
     BadCiphertext,
+}
+
+#[derive(Error, Debug)]
+pub enum SigError {
+    #[error("Generic PGP Error")]
+    PGPFail(#[from] pgp::errors::Error),
+    #[error("Missing public key for node")]
+    MissingPubKey,
+    #[error("MPI parsing went wrong")]
+    MPIFail,
 }
 
 /// Key exchange process happens as follows:
@@ -87,7 +99,7 @@ pub enum DoubleRatchet {
 }
 
 #[derive(Debug)]
-pub enum Cert {
+pub enum PGPPubkey {
     PeerUninit { fingerprint: Vec<u8> },
     NodeUninit,
     Initialized { pubkey: SignedPublicKey }
@@ -95,7 +107,7 @@ pub enum Cert {
 
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
-    pub certs: HashMap<String, Cert>,
+    pub pubkeys: HashMap<String, PGPPubkey>,
     /// Our private key
     pub secret_key: SignedSecretKey
 }
@@ -104,12 +116,12 @@ impl Crypto {
     pub fn new(secret_key: SignedSecretKey) -> Self {
         Self {
             ratchets: HashMap::new(),
-            certs: HashMap::new(),
+            pubkeys: HashMap::new(),
             secret_key
         }
     }
 
-    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, pgp::errors::Error> {
+    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, SigError> {
         let armored = self.secret_key
                       .public_key()
                       .sign(&self.secret_key, || "testpassword".to_string())?
@@ -117,17 +129,21 @@ impl Crypto {
         Ok(armored)
     }
 
+    pub fn get_pubkey_username(pubkey: SignedPublicKey) -> String {
+        format!("{0}", pubkey.details.users[0].id.id())
+    }
+
     pub fn try_add_pubkey(
         &mut self,
         pubkey_bytes: &Vec<u8>, 
         fingerprint: &Vec<u8>
-    ) -> Result<(), pgp::errors::Error> {
+    ) -> Result<(), SigError> {
         let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
         if pubkey.fingerprint() == *fingerprint {
-            let nodename = pubkey.clone().details.users[0].id.to_string();
-            self.certs.insert(
+            let nodename = Crypto::get_pubkey_username(pubkey.clone());
+            self.pubkeys.insert(
                 nodename.clone(),
-                Cert::Initialized {
+                PGPPubkey::Initialized {
                     pubkey: pubkey.clone()
                 }
             );
@@ -136,7 +152,7 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, pgp::errors::Error> {
+    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigError> {
         // So apparently the official RFC calls for more stuff but this works
         let digest = {
             let mut hasher = Sha256::new();
@@ -150,8 +166,42 @@ impl Crypto {
                                           HashAlgorithm::SHA2_256,
                                           digest)?;
 
-        let allbytes: Vec<&[u8]> = signature.iter().map(|m| m.as_bytes()).collect();
+        let mut allbytes: Vec<Vec<u8>> = Vec::new();
+        for mpi in signature {
+            allbytes.push(mpi.to_bytes()?);
+        }
         Ok(allbytes.concat())
+    }
+
+    pub fn verify_data(
+        &self,
+        source:&String,
+        signature: &Vec<u8>,
+        bytes: &Vec<u8>
+    ) -> Result<(), SigError> {
+
+        let signed_pub_key = match self.pubkeys.get(source).ok_or(SigError::MissingPubKey)? {
+            PGPPubkey::Initialized { pubkey } => pubkey,
+            PGPPubkey::PeerUninit { .. }
+            | PGPPubkey::NodeUninit { .. } => { return Err(SigError::MissingPubKey); }
+        };
+
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let (_unused, mpi_sig) = map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigError::MPIFail)?;
+
+        signed_pub_key.verify_signature(
+            HashAlgorithm::SHA2_256,
+            digest,
+            &mpi_sig
+        )?;
+        debug!("signature verified");
+        Ok(())
     }
 }
 

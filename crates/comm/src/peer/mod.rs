@@ -7,7 +7,7 @@ mod inbound;
 mod outbound;
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, Cert},
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, PGPPubkey, SigError},
     socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip},
 };
 use std::{
@@ -116,8 +116,12 @@ pub enum PeerError {
     // Failure in double ratchet
     #[error("Failure in double ratchet")]
     DRFail(#[from] DoubleRatchetError),
-    #[error("Failure in certificates")]
-    CertFail(#[from] pgp::errors::Error),
+    // Generic error with signature
+    #[error("Failure in signature verification")]
+    SigFail(#[from] SigError),
+    /// The packet we received does not conform to some format
+    #[error("Bad packet")]
+    BadPacket,
 }
 
 impl Peer {
@@ -271,11 +275,23 @@ impl Peer {
         signed_packet: crypto::v1::SignedPacket,
         app_inbound_tx: mpsc::Sender<ProtocolPacket>,
     ) -> Result<bool, PeerError> {
-        let signed_data = signed_packet.signed_data.unwrap();
-        let mut forward = false;
+        let signature = signed_packet.signature;
+        let signed_data = signed_packet.signed_data.ok_or(PeerError::BadPacket)?;
         debug!("dispatching gossip {:?}", signed_data.clone());
+
+        let cloned_signed_data = signed_data.clone();
+        let source = signed_data.source;
+        let mut forward = false;
+
         if signed_data.destination == self.username {
-            let source = signed_data.source;
+            {
+                let mut crypto_obj = self.crypto.write().await;
+                crypto_obj.verify_data(
+                    &source,
+                    &signature,
+                    &try_encode_internal_packet(&cloned_signed_data)?
+                )?;
+            }
             match signed_data.message_type {
                 Some(MessageType::KeyExchange(dr)) => {
                     let mut crypto_obj = self.crypto.write().await;
@@ -327,7 +343,7 @@ impl Peer {
         Ok(forward)
     }
 
-    async fn send_cert(&mut self) -> Result<(), PeerError> {
+    async fn send_pubkey(&mut self) -> Result<(), PeerError> {
         let armored = self.crypto.read().await.get_self_pubkey()?;
         self.send_packet(ProtocolPacket {
             packet_type: Some(ProtocolPacketType::PktCertex(
