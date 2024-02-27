@@ -18,7 +18,8 @@ use std::{
     io::Cursor
 };
 use string_protocol::{
-    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, PacketDecodeError,
+    crypto, gossip, try_decode_packet, try_encode_packet, try_encode_internal_packet,
+    MessageType, PacketDecodeError,
     PacketEncodeError, ProtocolPacket, ProtocolPacketType,
 };
 use thiserror::Error;
@@ -89,8 +90,6 @@ pub struct Peer {
     pub username: String,
     ///
     pub fingerprint: Vec<u8>,
-    ///
-    pub secret_key: SignedSecretKey
 }
 
 impl fmt::Debug for Peer {
@@ -130,7 +129,6 @@ impl Peer {
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         username: String,
         gossip_tx: mpsc::Sender<Gossip>,
-        secret_key: SignedSecretKey,
         fingerprint: Vec<u8>,
         initiate: bool,
     ) -> (
@@ -189,7 +187,6 @@ impl Peer {
                 crypto,
                 peers,
                 username,
-                secret_key,
                 fingerprint,
             },
             app_inbound_rx,
@@ -208,7 +205,6 @@ impl Peer {
 
     /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
     /// For distributing gossip check Socket class instead.
-    ///
     /// TODO: Sign the gossip packet's contents with our private key
     pub async fn send_gossip_single(
         &mut self,
@@ -220,10 +216,13 @@ impl Peer {
             source: self.username.clone(),
             message_type: Some(message),
         };
-        // TODO: Sign internal
+        let signature = {
+            let mut crypto = self.crypto.read().await;
+            crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+        };
         let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
-                signature: vec![],
+                signature: signature,
                 signed_data: Some(internal),
             }),
         });
@@ -329,10 +328,7 @@ impl Peer {
     }
 
     async fn send_cert(&mut self) -> Result<(), PeerError> {
-        let armored = self.secret_key
-                          .public_key()
-                          .sign(&self.secret_key, || "testpassword".to_string())?
-                          .to_armored_bytes(None)?;
+        let armored = self.crypto.read().await.get_self_pubkey()?;
         self.send_packet(ProtocolPacket {
             packet_type: Some(ProtocolPacketType::PktCertex(
                 crypto::v1::CertExchange {
@@ -344,18 +340,7 @@ impl Peer {
     }
 
     async fn get_pubkey(&self, pubkey_bytes: &Vec<u8>) -> Result<(), PeerError> {
-        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
-        if pubkey.fingerprint() == self.fingerprint {
-            let mut crypto = self.crypto.write().await;
-            let nodename = pubkey.clone().details.users[0].id.to_string();
-            crypto.certs.insert(
-                nodename.clone(),
-                Cert::Initialized {
-                    pubkey: pubkey.clone()
-                }
-            );
-            debug!("Got pubkey for {0}", nodename);
-        }
+        self.crypto.write().await.try_add_pubkey(pubkey_bytes, &self.fingerprint)?;
         Ok(())
     }
 }

@@ -83,8 +83,6 @@ pub struct Socket {
     pub username: String,
     /// Channel used to send gossip
     pub gossip_tx: mpsc::Sender<Gossip>,
-    /// Our private key
-    pub secret_key: SignedSecretKey
 }
 
 impl Socket {
@@ -100,7 +98,7 @@ impl Socket {
         // create peers map
         let peers = Arc::new(RwLock::new(HashMap::new()));
 
-        let crypto = Arc::new(RwLock::new(Crypto::new()));
+        let crypto = Arc::new(RwLock::new(Crypto::new(secret_key.clone())));
 
         let (gossip_tx, gossip_rx) = mpsc::channel(CHANNEL_SIZE);
 
@@ -125,7 +123,6 @@ impl Socket {
             crypto,
             username,
             gossip_tx,
-            secret_key
         })
     }
 
@@ -143,7 +140,6 @@ impl Socket {
             self.peers.clone(),
             self.username.clone(),
             self.gossip_tx.clone(),
-            self.secret_key.clone(),
             fingerprint,
             initiate,
         );

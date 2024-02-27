@@ -23,6 +23,7 @@ use pgp::{
     crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
     Deserializable
 };
+use sha2::{Sha256, Digest};
 
 #[derive(Error, Debug)]
 pub enum DoubleRatchetError {
@@ -94,23 +95,71 @@ pub enum Cert {
 
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
-    pub certs: HashMap<String, Cert>
+    pub certs: HashMap<String, Cert>,
+    /// Our private key
+    pub secret_key: SignedSecretKey
 }
 
 impl Crypto {
-    pub fn new() -> Self {
+    pub fn new(secret_key: SignedSecretKey) -> Self {
         Self {
             ratchets: HashMap::new(),
-            certs: HashMap::new()
+            certs: HashMap::new(),
+            secret_key
         }
+    }
+
+    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, pgp::errors::Error> {
+        let armored = self.secret_key
+                      .public_key()
+                      .sign(&self.secret_key, || "testpassword".to_string())?
+                      .to_armored_bytes(None)?;
+        Ok(armored)
+    }
+
+    pub fn try_add_pubkey(
+        &mut self,
+        pubkey_bytes: &Vec<u8>, 
+        fingerprint: &Vec<u8>
+    ) -> Result<(), pgp::errors::Error> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        if pubkey.fingerprint() == *fingerprint {
+            let nodename = pubkey.clone().details.users[0].id.to_string();
+            self.certs.insert(
+                nodename.clone(),
+                Cert::Initialized {
+                    pubkey: pubkey.clone()
+                }
+            );
+            debug!("Got pubkey for {0}", nodename);
+        }
+        Ok(())
+    }
+
+    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, pgp::errors::Error> {
+        // So apparently the official RFC calls for more stuff but this works
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let signature = self.secret_key
+                        .create_signature(|| "testpassword".to_string(),
+                                          HashAlgorithm::SHA2_256,
+                                          digest)?;
+
+        let allbytes: Vec<&[u8]> = signature.iter().map(|m| m.as_bytes()).collect();
+        Ok(allbytes.concat())
     }
 }
 
-impl Default for Crypto {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl Default for Crypto {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
 
 impl fmt::Debug for DoubleRatchet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
