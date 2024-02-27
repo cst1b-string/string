@@ -8,6 +8,21 @@ use string_protocol::crypto;
 use thiserror::Error;
 use tracing::debug;
 use x25519_dalek::{PublicKey, StaticSecret};
+use pgp::{
+    composed::{
+        KeyType,
+        KeyDetails,
+        SecretKey,
+        SecretSubkey,
+        key::SecretKeyParamsBuilder,
+        SignedSecretKey,
+        SignedPublicKey
+    },
+    packet::{KeyFlags, UserAttribute, UserId},
+    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
+    Deserializable
+};
 
 #[derive(Error, Debug)]
 pub enum DoubleRatchetError {
@@ -70,14 +85,23 @@ pub enum DoubleRatchet {
     },
 }
 
+#[derive(Debug)]
+pub enum Cert {
+    PeerUninit { fingerprint: Vec<u8> },
+    NodeUninit,
+    Initialized { pubkey: SignedPublicKey }
+}
+
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
+    pub certs: HashMap<String, Cert>
 }
 
 impl Crypto {
     pub fn new() -> Self {
         Self {
             ratchets: HashMap::new(),
+            certs: HashMap::new()
         }
     }
 }

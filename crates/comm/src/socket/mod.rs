@@ -30,23 +30,23 @@ pub use self::packet::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
 
+use pgp::{
+    composed::{
+        KeyType,
+        KeyDetails,
+        SecretKey,
+        SecretSubkey,
+        key::SecretKeyParamsBuilder,
+        SignedSecretKey
+    },
+    packet::{KeyFlags, UserAttribute, UserId},
+    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
+    Deserializable
+};
+
 /// Number of peers to send gossip to
 const GOSSIP_COUNT: usize = 3;
-
-/// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
-/// receiving packets from multiple peers.
-pub struct Socket {
-    /// The inner [UdpSocket] used for sending and receiving packets.
-    pub inner: Arc<UdpSocket>,
-    /// A map of connections to other peers.
-    pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    /// Crypto object, contains ratchets for other nodes
-    pub crypto: Arc<RwLock<Crypto>>,
-    /// Username used to identify this current node
-    pub username: String,
-    /// Channel used to send gossip
-    pub gossip_tx: mpsc::Sender<Gossip>,
-}
 
 pub enum GossipAction {
     /// Send a normal unencrypted packet to some peers via gossip
@@ -70,10 +70,27 @@ pub struct Gossip {
     pub dest: Option<String>
 }
 
+/// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
+/// receiving packets from multiple peers.
+pub struct Socket {
+    /// The inner [UdpSocket] used for sending and receiving packets.
+    pub inner: Arc<UdpSocket>,
+    /// A map of connections to other peers.
+    pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    /// Crypto object, contains ratchets for other nodes
+    pub crypto: Arc<RwLock<Crypto>>,
+    /// Username used to identify this current node
+    pub username: String,
+    /// Channel used to send gossip
+    pub gossip_tx: mpsc::Sender<Gossip>,
+    /// Our private key
+    pub secret_key: SignedSecretKey
+}
+
 impl Socket {
     /// Create a new `Socket` that is bound to the given address. This method also
     /// starts the background tasks that handle sending and receiving packets.
-    pub async fn bind(addr: SocketAddr, username: String) -> Result<Self, SocketError> {
+    pub async fn bind(addr: SocketAddr, secret_key: SignedSecretKey) -> Result<Self, SocketError> {
         // bind socket
         let socket: Arc<_> = UdpSocket::bind(addr)
             .await
@@ -95,12 +112,20 @@ impl Socket {
         span!(tracing::Level::INFO, "socket::gossip")
             .in_scope(|| start_gossip_worker(gossip_rx, peers.clone()));
 
+        if secret_key.details.users.len() != 1 {
+            // Why do we have a weird number of users
+            return Err(SocketError::CertError);
+        }
+
+        let username = secret_key.details.users[0].id.to_string();
+
         Ok(Self {
             inner: socket,
             peers,
             crypto,
             username,
-            gossip_tx
+            gossip_tx,
+            secret_key
         })
     }
 
@@ -109,6 +134,7 @@ impl Socket {
     pub async fn add_peer(
         &mut self,
         addr: SocketAddr,
+        fingerprint: Vec<u8>,
         initiate: bool,
     ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
         let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(
@@ -117,6 +143,8 @@ impl Socket {
             self.peers.clone(),
             self.username.clone(),
             self.gossip_tx.clone(),
+            self.secret_key.clone(),
+            fingerprint,
             initiate,
         );
 

@@ -81,6 +81,16 @@ pub fn start_peer_receiver_worker(
                                 "state transition"
                             );
                             *state.write().await = PeerState::Established;
+                            {
+                                let mut peers_write = peers.write().await;
+                                let peer = match peers_write.get_mut(&remote_addr) {
+                                    Some(p) => p,
+                                    None => {
+                                        continue;
+                                    }
+                                };
+                                let _ = peer.send_cert().await;
+                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
@@ -108,6 +118,16 @@ pub fn start_peer_receiver_worker(
                                 "state transition"
                             );
                             *state.write().await = PeerState::Established;
+                            {
+                                let mut peers_write = peers.write().await;
+                                let peer = match peers_write.get_mut(&remote_addr) {
+                                    Some(p) => p,
+                                    None => {
+                                        continue;
+                                    }
+                                };
+                                let _ = peer.send_cert().await;
+                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
@@ -204,7 +224,22 @@ pub fn start_peer_receiver_worker(
                                         dest: None
                                     }).await;
                                 }
-                            }
+                            },
+                            Some(ProtocolPacketType::PktCertex(ref certex)) => {
+                                {
+                                    let mut peers_write = peers.write().await;
+                                    let peer = match peers_write.get_mut(&remote_addr) {
+                                        Some(p) => p,
+                                        None => {
+                                            continue;
+                                        }
+                                    };
+
+                                    peer.get_pubkey(&certex.cert_pubkey)
+                                    .await
+                                    .unwrap()
+                                };
+                            },
                             Some(_) => {}
                             None => {}
                         }

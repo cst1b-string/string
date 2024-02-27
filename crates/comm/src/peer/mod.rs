@@ -7,7 +7,7 @@ mod inbound;
 mod outbound;
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, Cert},
     socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip},
 };
 use std::{
@@ -15,6 +15,7 @@ use std::{
     fmt,
     net::SocketAddr,
     sync::Arc,
+    io::Cursor
 };
 use string_protocol::{
     crypto, gossip, try_decode_packet, try_encode_packet, MessageType, PacketDecodeError,
@@ -29,6 +30,22 @@ use tokio::sync::{
 use tracing::{error, span, warn, debug, Level};
 
 use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
+
+use pgp::{
+    composed::{
+        KeyType,
+        KeyDetails,
+        SecretKey,
+        SecretSubkey,
+        key::SecretKeyParamsBuilder,
+        SignedSecretKey,
+        SignedPublicKey
+    },
+    packet::{KeyFlags, UserAttribute, UserId},
+    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
+    Deserializable,
+};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -70,6 +87,10 @@ pub struct Peer {
     /// The username of this peer.
     /// TODO: switch to a slightly more rigorous notion of identity.
     pub username: String,
+    ///
+    pub fingerprint: Vec<u8>,
+    ///
+    pub secret_key: SignedSecretKey
 }
 
 impl fmt::Debug for Peer {
@@ -96,6 +117,8 @@ pub enum PeerError {
     // Failure in double ratchet
     #[error("Failure in double ratchet")]
     DRFail(#[from] DoubleRatchetError),
+    #[error("Failure in certificates")]
+    CertFail(#[from] pgp::errors::Error),
 }
 
 impl Peer {
@@ -107,6 +130,8 @@ impl Peer {
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         username: String,
         gossip_tx: mpsc::Sender<Gossip>,
+        secret_key: SignedSecretKey,
+        fingerprint: Vec<u8>,
         initiate: bool,
     ) -> (
         Self,
@@ -164,6 +189,8 @@ impl Peer {
                 crypto,
                 peers,
                 username,
+                secret_key,
+                fingerprint,
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -299,5 +326,36 @@ impl Peer {
             forward = true;
         }
         Ok(forward)
+    }
+
+    async fn send_cert(&mut self) -> Result<(), PeerError> {
+        let armored = self.secret_key
+                          .public_key()
+                          .sign(&self.secret_key, || "testpassword".to_string())?
+                          .to_armored_bytes(None)?;
+        self.send_packet(ProtocolPacket {
+            packet_type: Some(ProtocolPacketType::PktCertex(
+                crypto::v1::CertExchange {
+                    cert_pubkey: armored
+                }
+            )),
+        }).await?;
+        Ok(())
+    }
+
+    async fn get_pubkey(&self, pubkey_bytes: &Vec<u8>) -> Result<(), PeerError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        if pubkey.fingerprint() == self.fingerprint {
+            let mut crypto = self.crypto.write().await;
+            let nodename = pubkey.clone().details.users[0].id.to_string();
+            crypto.certs.insert(
+                nodename.clone(),
+                Cert::Initialized {
+                    pubkey: pubkey.clone()
+                }
+            );
+            debug!("Got pubkey for {0}", nodename);
+        }
+        Ok(())
     }
 }

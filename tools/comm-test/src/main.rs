@@ -25,7 +25,7 @@ use pgp::{
     },
     errors::Result,
     packet::{KeyFlags, UserAttribute, UserId},
-    types::{PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
     crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
     Deserializable
 };
@@ -34,25 +34,30 @@ use pgp::{
 #[derive(Debug, Parser)]
 struct Args {
     /// The source port to bind to.
-    bind_port: u16,
+    #[clap(long, required = false)]
+    port: Option<u16>,
     /// The destination IP address to add as a peer.
-    #[clap(value_delimiter = ',')]
-    peer_addrs: Vec<SocketAddr>,
+    #[clap(long, value_delimiter = ',')]
+    addrs: Vec<SocketAddr>,
+    /// Fingerprint string of each peer
+    #[clap(value_delimiter = ',', long)]
+    fingerprints: Vec<String>,
     /// Whether to initiate the connection.
     #[clap(long)]
     initiate: bool,
-    #[clap(long)]
+    #[clap(long, required = true)]
     username: String,
+    #[clap(long)]
+    generate: bool,
 }
 
 fn generate_key(username: String, password: String) -> SignedSecretKey {
-    let user_id = format!("{username} <{username}@cam.ac.uk>");
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
     .key_type(KeyType::Rsa(2048))
     .can_certify(false)
     .can_sign(true)
-    .primary_user_id(user_id.into())
+    .primary_user_id(username.into())
     .preferred_symmetric_algorithms(smallvec![
         SymmetricKeyAlgorithm::AES256,
     ])
@@ -92,10 +97,12 @@ fn get_key_path() -> String {
 #[tokio::main]
 async fn main() {
     let Args {
-        bind_port,
+        port: bind_port,
         initiate,
-        peer_addrs,
+        addrs: peer_addrs,
+        fingerprints,
         username,
+        generate
     } = Args::parse();
 
     // initialise tracing
@@ -118,10 +125,21 @@ async fn main() {
         }
     };
 
+    // I am hoping by only checking < instead of !=, I can leave on extra fingerprints
+    // so it's easier to type the commands when testing
+    if fingerprints.len() < peer_addrs.len() {
+        error!("[-] Not enough fingerprints provided.");
+        return;
+    }
+
     info!("[+] Key loaded!");
+    info!("[+] Fingerprint: {0}", hex::encode(secret_key.public_key().fingerprint()));
+
+    // Only generate key
+    if generate { return; }
 
     // bind to the socket
-    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), username.clone()).await {
+    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port.unwrap()).into(), secret_key).await {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -133,8 +151,9 @@ async fn main() {
     let mut senders: Vec<mpsc::Sender<ProtocolPacket>> = Vec::new();
     let mut receivers: Vec<mpsc::Receiver<ProtocolPacket>> = Vec::new();
 
-    for peer_addr in &peer_addrs {
-        let (app_outbound_tx, app_inbound_rx) = socket.add_peer(*peer_addr, initiate).await;
+    for (i, peer_addr) in peer_addrs.iter().enumerate() {
+        let fingerprint = hex::decode(&fingerprints[i]).expect("Invalid fingerprint format");
+        let (app_outbound_tx, app_inbound_rx) = socket.add_peer(*peer_addr, fingerprint, initiate).await;
         senders.push(app_outbound_tx);
         receivers.push(app_inbound_rx);
     }

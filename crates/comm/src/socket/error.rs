@@ -35,6 +35,9 @@ pub enum SocketError {
     /// Tried to send gossip, but 0 peers connected
     #[error("No peer for gossip")]
     NoPeer,
+    /// Generic certificate errors
+    #[error("Generic certificate error")]
+    CertError
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
