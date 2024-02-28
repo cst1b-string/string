@@ -5,13 +5,15 @@ import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import { Home } from "./app/page";
 import { Navbar } from "./components/navbar";
 import "./globals.css";
-import { IntegrationProvider } from "./integration";
+import { client, queryClient, rspc } from "./integration";
 
 const Layout: React.FC<React.PropsWithChildren> = ({ children }) => (
-	<IntegrationProvider>
-		<Navbar />
-		{children}
-	</IntegrationProvider>
+	<rspc.Provider queryClient={queryClient} client={client}>
+		<>
+			<Navbar />
+			{children}
+		</>
+	</rspc.Provider>
 );
 
 const router = createBrowserRouter([
@@ -27,9 +29,6 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
 	<React.StrictMode>
-		<IntegrationProvider>
-			<Navbar />
-			<RouterProvider router={router} />
-		</IntegrationProvider>
+		<RouterProvider router={router} />
 	</React.StrictMode>
 );
