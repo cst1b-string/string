@@ -1,14 +1,5 @@
 import { Logo } from './logo';
-import { SignInButton } from './sign-in-button';
 import { SettingsButton } from './settings-button';
-
-function LoginOrSettingsButton( { loggedIn } : { loggedIn: boolean }) {
-  if (loggedIn) {
-	return <SettingsButton />;
-  } else {
-	return <SignInButton />;
-  }
-}
 
 export const Navbar = () => {
 	return (
@@ -16,7 +7,7 @@ export const Navbar = () => {
         <div className="container mx-auto px-4 h-full">
           <div className="flex justify-between items-center h-full">
             <Logo />
-			{LoginOrSettingsButton({ loggedIn: false })}
+			< SettingsButton />
           </div>
         </div>
       </div>
