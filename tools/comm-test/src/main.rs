@@ -221,6 +221,8 @@ async fn main() {
                 if let Some((prefix, rest)) = trimmed.split_once(' ') {
                     if prefix == "dr" {
                         let _ = socket.start_dr(rest.to_string()).await;
+                    } else if prefix == "cert" {
+                        let _ = socket.get_node_cert(rest.to_string()).await;
                     } else if prefix == "msg" {
                         if let Some((destination, message)) = rest.split_once(' ') {
                             let message = messages::v1::Message {

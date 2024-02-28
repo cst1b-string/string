@@ -3,7 +3,12 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use double_ratchet_rs::{Header, Ratchet};
 use rand::rngs::OsRng;
-use std::{collections::HashMap, fmt, io::Cursor};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    fmt,
+    io::Cursor,
+    net::SocketAddr
+};
 use string_protocol::crypto;
 use thiserror::Error;
 use tracing::debug;
@@ -42,6 +47,8 @@ pub enum DoubleRatchetError {
 
 #[derive(Error, Debug)]
 pub enum SigError {
+    #[error("Fingerprint mismatch")]
+    FingerprintMismatch,
     #[error("Generic PGP Error")]
     PGPFail(#[from] pgp::errors::Error),
     #[error("Missing public key for node")]
@@ -101,7 +108,7 @@ pub enum DoubleRatchet {
 #[derive(Debug)]
 pub enum PGPPubkey {
     PeerUninit { fingerprint: Vec<u8> },
-    NodeUninit,
+    NodeUninit { reply_to: Vec<SocketAddr> },
     Initialized { pubkey: SignedPublicKey }
 }
 
@@ -133,23 +140,87 @@ impl Crypto {
         format!("{0}", pubkey.details.users[0].id.id())
     }
 
-    pub fn try_add_pubkey(
+    pub fn add_pubkey(
+        &mut self,
+        pubkey: SignedPublicKey, 
+    ) -> Result<String, SigError> {
+        let nodename = Crypto::get_pubkey_username(pubkey.clone());
+        self.pubkeys.insert(
+            nodename.clone(),
+            PGPPubkey::Initialized {
+                pubkey: pubkey.clone()
+            }
+        );
+        debug!("Got pubkey for {0}", nodename);
+        Ok(nodename)
+    }
+
+    pub fn add_pubkey_raw(
         &mut self,
         pubkey_bytes: &Vec<u8>, 
-        fingerprint: &Vec<u8>
-    ) -> Result<(), SigError> {
+    ) -> Result<String, SigError> {
         let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
-        if pubkey.fingerprint() == *fingerprint {
-            let nodename = Crypto::get_pubkey_username(pubkey.clone());
-            self.pubkeys.insert(
-                nodename.clone(),
-                PGPPubkey::Initialized {
-                    pubkey: pubkey.clone()
-                }
-            );
-            debug!("Got pubkey for {0}", nodename);
+        Ok(self.add_pubkey(pubkey)?)
+    }
+
+    pub fn try_add_peer_pubkey(
+        &mut self,
+        peer: SocketAddr,
+        pubkey_bytes: &Vec<u8>, 
+        fingerprint: &Vec<u8>
+    ) -> Result<String, SigError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        let res = if pubkey.fingerprint() == *fingerprint {
+            Ok(self.add_pubkey(pubkey)?)
         }
-        Ok(())
+        else {
+            Err(SigError::FingerprintMismatch)
+        };
+        res
+    }
+
+    pub fn lookup_pubkey(&mut self, dest: String)
+    -> Option<SignedPublicKey> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(entry) => {
+                match entry.get() {
+                    PGPPubkey::Initialized { pubkey } => Some(pubkey.clone()),
+                    PGPPubkey::NodeUninit { .. } 
+                    | PGPPubkey::PeerUninit { .. } => None,
+                }
+            }
+            Entry::Vacant(entry) => None
+        };
+        result
+    }
+
+    pub fn insert_pubkey_reply_to(&mut self, dest: String, whos_asking: Option<SocketAddr>)
+    -> Option<Vec<SocketAddr>> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(mut entry) => {
+                match entry.get_mut() {
+                    PGPPubkey::NodeUninit { reply_to } => {
+                        if whos_asking.is_some() {
+                            reply_to.push(whos_asking.unwrap());
+                        }
+                        Some(reply_to.clone())
+                    }
+                    PGPPubkey::Initialized { .. }
+                    | PGPPubkey::PeerUninit { .. } => None,
+                }
+            }
+            Entry::Vacant(entry) => {
+                let mut reply_to = Vec::new();
+                if whos_asking.is_some() {
+                    reply_to.push(whos_asking.unwrap());
+                }
+                entry.insert(PGPPubkey::NodeUninit {
+                    reply_to: reply_to.clone()
+                });
+                Some(reply_to)
+            }
+        };
+        result
     }
 
     pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigError> {

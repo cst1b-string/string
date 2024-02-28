@@ -18,7 +18,7 @@ use tokio::{
 use tracing::{debug, error, span, trace};
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet},
+    crypto::{Crypto, DoubleRatchet, PGPPubkey},
     maybe_continue,
     peer::{Peer, PeerState, CHANNEL_SIZE},
     try_break, try_continue,
@@ -29,6 +29,8 @@ pub use self::error::{SocketError, SocketPacketDecodeError};
 pub use self::packet::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
+
+use string_protocol::crypto;
 
 use pgp::{
     composed::{
@@ -55,6 +57,8 @@ pub enum GossipAction {
     SendEncrypted,
     /// We received a gossip packet, please forward it
     Forward,
+    /// Actually not a gossip, just send directly
+    SendDirect
 }
 
 pub struct Gossip {
@@ -67,7 +71,9 @@ pub struct Gossip {
     /// Gossip message to forward (either this or the one above)
     pub message: Option<MessageType>,
     /// Destination to send to; not needed when forwarding
-    pub dest: Option<String>
+    pub dest: Option<String>,
+    ///
+    pub dest_sockaddr: Option<SocketAddr>
 }
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
@@ -212,7 +218,8 @@ impl Socket {
             addr: None,
             packet: None,
             message: Some(message),
-            dest: Some(destination)
+            dest: Some(destination),
+            dest_sockaddr: None
         }).await;
         Ok(())
     }
@@ -241,8 +248,23 @@ impl Socket {
             addr: None,
             packet: Some(packet),
             message: None,
-            dest: Some(destination)
+            dest: Some(destination),
+            dest_sockaddr: None
         }).await;
+        Ok(())
+    }
+
+    pub async fn get_node_cert(
+        &mut self,
+        destination: String,
+    ) -> Result<(), SocketError> {
+        {
+            let mut crypto_obj = self.crypto.write().await;
+            crypto_obj.insert_pubkey_reply_to(destination.clone(), None);
+        }
+        self.send_gossip(MessageType::PubkeyRequest(
+            crypto::v1::PubkeyRequest {}
+        ), destination).await?;
         Ok(())
     }
 
@@ -335,10 +357,26 @@ fn start_gossip_worker(
             trace!("start gossip task loop");
 
             // receive gossip
-            let Gossip {action, addr: skip, packet, message, dest} = match gossip_rx.recv().await {
+            let Gossip {action, addr: skip, packet, message, dest, dest_sockaddr} = match gossip_rx.recv().await {
                 Some(gossip) => gossip,
                 None => break,
             };
+
+            match action {
+                GossipAction::SendDirect => {
+                    let mut peers_obj = peers.write().await;
+                    let peer = peers_obj.get_mut(&dest_sockaddr.unwrap());
+                    if peer.is_none() { continue; }
+                    let peer_ = peer.unwrap();
+                    let peername = peer_.peername.clone();
+                    peer_.send_gossip_single(
+                        message.unwrap().clone(),
+                        peername.unwrap(),
+                    ).await;
+                    continue;
+                }
+                _ => {}
+            }
 
             // Selects at most 3 peers randomly from list of peers - should
             // probably employ round robin here.
@@ -380,6 +418,7 @@ fn start_gossip_worker(
                             trace!("forwarding gossip {:?}", packet);
                             target_peer_.send_packet(packet.clone().unwrap()).await
                         },
+                        GossipAction::SendDirect => unreachable!()
                     };
                     if res.is_ok() {}
             }

@@ -10,6 +10,6 @@ message Packet {
 	oneof packet_type {
 		str.gossip.v1.Gossip pkt_gossip = 1;
 		str.messages.v1.Message pkt_message = 2;
-		str.crypto.v1.CertExchange pkt_certex = 3;
+		str.crypto.v1.PeerPubKeyExchange pkt_peerpubexchange = 3;
 	}
 }

@@ -208,6 +208,8 @@ pub fn start_peer_receiver_worker(
                                     try_continue!(peer.dispatch_gossip(
                                         signed_packet.clone(),
                                         app_inbound_tx.clone(),
+                                        remote_addr.clone(),
+                                        gossip_tx.clone()
                                     )
                                     .await)
                                 };
@@ -220,11 +222,12 @@ pub fn start_peer_receiver_worker(
                                         addr: Some(remote_addr),
                                         packet: Some(packet),
                                         message: None,
-                                        dest: None
+                                        dest: None,
+                                        dest_sockaddr: None
                                     }).await;
                                 }
                             },
-                            Some(ProtocolPacketType::PktCertex(ref certex)) => {
+                            Some(ProtocolPacketType::PktPeerpubexchange(ref peerpubexchange)) => {
                                 {
                                     let mut peers_write = peers.write().await;
                                     let peer = match peers_write.get_mut(&remote_addr) {
@@ -234,7 +237,7 @@ pub fn start_peer_receiver_worker(
                                         }
                                     };
 
-                                    peer.get_pubkey(&certex.cert_pubkey)
+                                    peer.add_peer_pubkey(&peerpubexchange.pubkey)
                                     .await
                                     .unwrap()
                                 };
