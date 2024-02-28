@@ -1,10 +1,8 @@
-import Image from 'next/image';
-import Link from 'next/link';
+import SettingsGear from "@/assets/settings-gear.png";
+import { Link } from "react-router-dom";
 
-export const SettingsButton = () => {
-	return (
-		<Link href='/settings'>
-			<Image src='/settings-gear.png' alt='Settings' width={40} height={30} />
-		</Link>
-	);
-}
+export const SettingsButton = () => (
+	<Link to="/settings">
+		<img src={SettingsGear} alt="Settings" width={40} height={30} />
+	</Link>
+);

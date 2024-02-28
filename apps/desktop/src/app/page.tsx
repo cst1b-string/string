@@ -4,7 +4,7 @@ import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
 import { useRspc } from "@/integration";
 
-export default function Home() {
+export function Home() {
 	const rspc = useRspc();
 
 	rspc.useQuery(["settings.theme"]);

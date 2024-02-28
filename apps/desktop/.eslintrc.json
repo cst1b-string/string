@@ -1,5 +1,5 @@
 {
-	"extends": "infernal/next",
+	"extends": "infernal/react",
 	"settings": {
 		"next": {
 			"rootDir": "apps/desktop"

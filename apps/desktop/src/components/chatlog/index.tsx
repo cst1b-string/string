@@ -1,5 +1,3 @@
-"use client";
-
 import { faker } from "@faker-js/faker";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import React from "react";

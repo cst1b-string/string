@@ -1,9 +1,9 @@
-import Link from "next/link";
+import { Link } from "react-router-dom";
 
-export const Logo = () => {
-	return (
-		<div className="flex items-center">
-			<Link href='.' className="text-white text-2xl font-bold">String</Link>
-		</div>
-	);
-}
+export const Logo = () => (
+	<div className="flex items-center">
+		<Link to="." className="text-white text-2xl font-bold">
+			String
+		</Link>
+	</div>
+);
