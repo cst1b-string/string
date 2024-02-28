@@ -2,13 +2,8 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
-import { useRspc } from "@/integration";
 
 export default function Home() {
-	const rspc = useRspc();
-
-	rspc.useQuery(["settings.theme"]);
-
 	return (
 		<div className="grid grid-cols-3 divide-x divide-gray-400 h-[calc(100vh-80px)]">
 			<div className="">
