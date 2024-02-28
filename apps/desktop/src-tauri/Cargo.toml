@@ -26,7 +26,7 @@ tokio = { workspace = true }
 
 rspc = { version = "0.1", features = ["tauri"] }
 serde_json = "1.0"
-tauri = { version = "1.5.4", features = [] }
+tauri = { version = "1.5.4", features = ["window-all"] }
 tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

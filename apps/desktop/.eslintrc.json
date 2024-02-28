@@ -4,5 +4,9 @@
 		"next": {
 			"rootDir": "apps/desktop"
 		}
+	},
+	"rules": {
+		"no-undef": "off",
+		"no-useless-constructor": "off"
 	}
 }

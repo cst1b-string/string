@@ -1,3 +1,5 @@
+"use client";
+
 import { createClient } from "@rspc/client";
 import { createReactQueryHooks } from "@rspc/react";
 import { TauriTransport } from "@rspc/tauri";
@@ -47,7 +49,7 @@ export const IntegrationProvider: React.FC<React.PropsWithChildren> = ({ childre
 		<IntegrationContext.Provider value={integration}>
 			<integration.rspc.Provider
 				client={integration.client}
-				//@ts-expect-error Something is wrong with RSPC's types
+				// @ts-expect-error Something is wrong with RSPC's types
 				queryClient={integration.queryClient}
 			>
 				<>{children}</>

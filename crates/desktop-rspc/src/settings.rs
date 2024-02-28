@@ -42,6 +42,13 @@ impl SettingsContext {
     /// Attempt to load the settings from the given path.
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, SettingsError> {
         let path = path.as_ref();
+        // check if file exists, otherwise copy defaults
+        if !path.exists() {
+            let settings = Settings::default();
+            let file = std::fs::File::create(path)?;
+            serde_json::to_writer(file, &settings)?;
+        }
+
         // read from file
         let content = tokio::fs::read_to_string(path).await?;
         let settings = serde_json::from_str(&content)?;
