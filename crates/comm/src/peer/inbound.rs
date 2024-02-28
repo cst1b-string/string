@@ -9,15 +9,15 @@ use std::{
 };
 
 use string_protocol::{
-    try_decode_packet, try_verify_packet_sig, ProtocolPacket, ProtocolPacketType,
+    try_decode_packet, ProtocolPacket, ProtocolPacketType,
 };
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace};
 
 use crate::{
     maybe_break,
-    socket::{SocketPacket, SocketPacketType},
-    try_break, try_continue, Peer, Socket,
+    socket::{SocketPacket, SocketPacketType, Gossip, GossipAction},
+    try_break, try_continue, Peer,
 };
 
 use super::PeerState;
@@ -31,8 +31,9 @@ pub fn start_peer_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     remote_addr: SocketAddr,
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    packet_number: Arc<Mutex<u32>>,
+    _packet_number: Arc<Mutex<u32>>,
     packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
+    gossip_tx: mpsc::Sender<Gossip>,
 ) {
     tokio::task::spawn(async move {
         // priority queue for packets - this guarantees correct sequencing of UDP
@@ -80,6 +81,16 @@ pub fn start_peer_receiver_worker(
                                 "state transition"
                             );
                             *state.write().await = PeerState::Established;
+                            {
+                                let mut peers_write = peers.write().await;
+                                let peer = match peers_write.get_mut(&remote_addr) {
+                                    Some(p) => p,
+                                    None => {
+                                        continue;
+                                    }
+                                };
+                                let _ = peer.send_pubkey().await;
+                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
@@ -107,6 +118,16 @@ pub fn start_peer_receiver_worker(
                                 "state transition"
                             );
                             *state.write().await = PeerState::Established;
+                            {
+                                let mut peers_write = peers.write().await;
+                                let peer = match peers_write.get_mut(&remote_addr) {
+                                    Some(p) => p,
+                                    None => {
+                                        continue;
+                                    }
+                                };
+                                let _ = peer.send_pubkey().await;
+                            }
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
@@ -154,12 +175,12 @@ pub fn start_peer_receiver_worker(
                             Err(_) => continue,
                         };
 
-                        if current_state == PeerState::Established {
-                            // clear queue - return early to avoid lots of nesting
-                            debug!("clear packet queue");
-                            packet_queue.clear();
-                            continue;
-                        }
+                        // if current_state == PeerState::Established {
+                        //     // clear queue - return early to avoid lots of nesting
+                        //     debug!("clear packet queue");
+                        //     packet_queue.clear();
+                        //     continue;
+                        // }
 
                         match packet.packet_type {
                             Some(ProtocolPacketType::PktGossip(ref gossip)) => {
@@ -180,24 +201,47 @@ pub fn start_peer_receiver_worker(
                                     };
 
                                     // Verify signature on packet
-                                    let signed_packet =
-                                        try_continue!(try_verify_packet_sig(&signed_packet));
+                                    // let signed_packet =
+                                    //     try_continue!(try_verify_packet_sig(&signed_packet));
 
                                     // Dispatch gossip to respective code if its for us...
-                                    peer.dispatch_gossip(
+                                    try_continue!(peer.dispatch_gossip(
                                         signed_packet.clone(),
                                         app_inbound_tx.clone(),
+                                        remote_addr.clone(),
+                                        gossip_tx.clone()
                                     )
-                                    .await
-                                    .unwrap()
+                                    .await)
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {
-                                    // let _ =
-                                    //     Socket::forward_gossip(packet, peers.clone(), remote_addr)
-                                    //         .await;
+                                    debug!("going to forward packet");
+                                    let _ =
+                                    gossip_tx.send(Gossip {
+                                        action: GossipAction::Forward,
+                                        addr: Some(remote_addr),
+                                        packet: Some(packet),
+                                        message: None,
+                                        dest: None,
+                                        dest_sockaddr: None
+                                    }).await;
                                 }
-                            }
+                            },
+                            Some(ProtocolPacketType::PktPeerpubexchange(ref peerpubexchange)) => {
+                                {
+                                    let mut peers_write = peers.write().await;
+                                    let peer = match peers_write.get_mut(&remote_addr) {
+                                        Some(p) => p,
+                                        None => {
+                                            continue;
+                                        }
+                                    };
+
+                                    peer.add_peer_pubkey(&peerpubexchange.pubkey)
+                                    .await
+                                    .unwrap()
+                                };
+                            },
                             Some(_) => {}
                             None => {}
                         }

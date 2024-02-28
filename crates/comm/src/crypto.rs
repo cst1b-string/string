@@ -3,11 +3,34 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use double_ratchet_rs::{Header, Ratchet};
 use rand::rngs::OsRng;
-use std::{collections::HashMap, fmt, io::Cursor};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    fmt,
+    io::Cursor,
+    net::SocketAddr
+};
 use string_protocol::crypto;
 use thiserror::Error;
 use tracing::debug;
 use x25519_dalek::{PublicKey, StaticSecret};
+use pgp::{
+    composed::{
+        KeyType,
+        KeyDetails,
+        SecretKey,
+        SecretSubkey,
+        key::SecretKeyParamsBuilder,
+        SignedSecretKey,
+        SignedPublicKey
+    },
+    packet::{KeyFlags, UserAttribute, UserId},
+    types::{mpi, Mpi, KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
+    Deserializable,
+    ser::Serialize
+};
+use sha2::{Sha256, Digest};
+use nom::combinator::map;
 
 #[derive(Error, Debug)]
 pub enum DoubleRatchetError {
@@ -20,6 +43,18 @@ pub enum DoubleRatchetError {
     // Currently generic, todo make more specific
     #[error("Ciphertext is bad")]
     BadCiphertext,
+}
+
+#[derive(Error, Debug)]
+pub enum SigError {
+    #[error("Fingerprint mismatch")]
+    FingerprintMismatch,
+    #[error("Generic PGP Error")]
+    PGPFail(#[from] pgp::errors::Error),
+    #[error("Missing public key for node")]
+    MissingPubKey,
+    #[error("MPI parsing went wrong")]
+    MPIFail,
 }
 
 /// Key exchange process happens as follows:
@@ -70,23 +105,182 @@ pub enum DoubleRatchet {
     },
 }
 
+#[derive(Debug)]
+pub enum PGPPubkey {
+    PeerUninit { fingerprint: Vec<u8> },
+    NodeUninit { reply_to: Vec<SocketAddr> },
+    Initialized { pubkey: SignedPublicKey }
+}
+
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
+    pub pubkeys: HashMap<String, PGPPubkey>,
+    /// Our private key
+    pub secret_key: SignedSecretKey
 }
 
 impl Crypto {
-    pub fn new() -> Self {
+    pub fn new(secret_key: SignedSecretKey) -> Self {
         Self {
             ratchets: HashMap::new(),
+            pubkeys: HashMap::new(),
+            secret_key
         }
+    }
+
+    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, SigError> {
+        let armored = self.secret_key
+                      .public_key()
+                      .sign(&self.secret_key, || "testpassword".to_string())?
+                      .to_armored_bytes(None)?;
+        Ok(armored)
+    }
+
+    pub fn get_pubkey_username(pubkey: SignedPublicKey) -> String {
+        format!("{0}", pubkey.details.users[0].id.id())
+    }
+
+    pub fn add_pubkey(
+        &mut self,
+        pubkey: SignedPublicKey, 
+    ) -> Result<String, SigError> {
+        let nodename = Crypto::get_pubkey_username(pubkey.clone());
+        self.pubkeys.insert(
+            nodename.clone(),
+            PGPPubkey::Initialized {
+                pubkey: pubkey.clone()
+            }
+        );
+        debug!("Got pubkey for {0}", nodename);
+        Ok(nodename)
+    }
+
+    pub fn add_pubkey_raw(
+        &mut self,
+        pubkey_bytes: &Vec<u8>, 
+    ) -> Result<String, SigError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        Ok(self.add_pubkey(pubkey)?)
+    }
+
+    pub fn try_add_peer_pubkey(
+        &mut self,
+        peer: SocketAddr,
+        pubkey_bytes: &Vec<u8>, 
+        fingerprint: &Vec<u8>
+    ) -> Result<String, SigError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        let res = if pubkey.fingerprint() == *fingerprint {
+            Ok(self.add_pubkey(pubkey)?)
+        }
+        else {
+            Err(SigError::FingerprintMismatch)
+        };
+        res
+    }
+
+    pub fn lookup_pubkey(&mut self, dest: String)
+    -> Option<SignedPublicKey> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(entry) => {
+                match entry.get() {
+                    PGPPubkey::Initialized { pubkey } => Some(pubkey.clone()),
+                    PGPPubkey::NodeUninit { .. } 
+                    | PGPPubkey::PeerUninit { .. } => None,
+                }
+            }
+            Entry::Vacant(entry) => None
+        };
+        result
+    }
+
+    pub fn insert_pubkey_reply_to(&mut self, dest: String, whos_asking: Option<SocketAddr>)
+    -> Option<Vec<SocketAddr>> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(mut entry) => {
+                match entry.get_mut() {
+                    PGPPubkey::NodeUninit { reply_to } => {
+                        if whos_asking.is_some() {
+                            reply_to.push(whos_asking.unwrap());
+                        }
+                        Some(reply_to.clone())
+                    }
+                    PGPPubkey::Initialized { .. }
+                    | PGPPubkey::PeerUninit { .. } => None,
+                }
+            }
+            Entry::Vacant(entry) => {
+                let mut reply_to = Vec::new();
+                if whos_asking.is_some() {
+                    reply_to.push(whos_asking.unwrap());
+                }
+                entry.insert(PGPPubkey::NodeUninit {
+                    reply_to: reply_to.clone()
+                });
+                Some(reply_to)
+            }
+        };
+        result
+    }
+
+    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigError> {
+        // So apparently the official RFC calls for more stuff but this works
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let signature = self.secret_key
+                        .create_signature(|| "testpassword".to_string(),
+                                          HashAlgorithm::SHA2_256,
+                                          digest)?;
+
+        let mut allbytes: Vec<Vec<u8>> = Vec::new();
+        for mpi in signature {
+            allbytes.push(mpi.to_bytes()?);
+        }
+        Ok(allbytes.concat())
+    }
+
+    pub fn verify_data(
+        &self,
+        source:&String,
+        signature: &Vec<u8>,
+        bytes: &Vec<u8>
+    ) -> Result<(), SigError> {
+
+        let signed_pub_key = match self.pubkeys.get(source).ok_or(SigError::MissingPubKey)? {
+            PGPPubkey::Initialized { pubkey } => pubkey,
+            PGPPubkey::PeerUninit { .. }
+            | PGPPubkey::NodeUninit { .. } => { return Err(SigError::MissingPubKey); }
+        };
+
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let (_unused, mpi_sig) = map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigError::MPIFail)?;
+
+        signed_pub_key.verify_signature(
+            HashAlgorithm::SHA2_256,
+            digest,
+            &mpi_sig
+        )?;
+        debug!("signature verified");
+        Ok(())
     }
 }
 
-impl Default for Crypto {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl Default for Crypto {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
 
 impl fmt::Debug for DoubleRatchet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -7,17 +7,19 @@ mod inbound;
 mod outbound;
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, DoubleRatchetError},
-    socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, PGPPubkey, SigError},
+    socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip, GossipAction},
 };
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::SocketAddr,
     sync::Arc,
+    io::Cursor
 };
 use string_protocol::{
-    crypto, gossip, try_decode_packet, try_encode_packet, MessageType, PacketDecodeError,
+    crypto, gossip, try_decode_packet, try_encode_packet, try_encode_internal_packet,
+    MessageType, PacketDecodeError,
     PacketEncodeError, ProtocolPacket, ProtocolPacketType,
 };
 use thiserror::Error;
@@ -26,9 +28,25 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-use tracing::{error, span, warn, Level};
+use tracing::{error, span, warn, debug, Level};
 
 use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
+
+use pgp::{
+    composed::{
+        KeyType,
+        KeyDetails,
+        SecretKey,
+        SecretSubkey,
+        key::SecretKeyParamsBuilder,
+        SignedSecretKey,
+        SignedPublicKey
+    },
+    packet::{KeyFlags, UserAttribute, UserId},
+    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
+    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
+    Deserializable,
+};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -67,9 +85,13 @@ pub struct Peer {
     pub crypto: Arc<RwLock<Crypto>>,
     /// A reference to the socket's peers.
     pub peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    /// The username of this peer.
+    /// The username of our current node, not to be confused with name of peer
     /// TODO: switch to a slightly more rigorous notion of identity.
     pub username: String,
+    ///
+    pub peername: Option<String>,
+    ///
+    pub fingerprint: Vec<u8>,
 }
 
 impl fmt::Debug for Peer {
@@ -96,6 +118,12 @@ pub enum PeerError {
     // Failure in double ratchet
     #[error("Failure in double ratchet")]
     DRFail(#[from] DoubleRatchetError),
+    // Generic error with signature
+    #[error("Failure in signature verification")]
+    SigFail(#[from] SigError),
+    /// The packet we received does not conform to some format
+    #[error("Bad packet")]
+    BadPacket,
 }
 
 impl Peer {
@@ -106,6 +134,8 @@ impl Peer {
         crypto: Arc<RwLock<Crypto>>,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
         username: String,
+        gossip_tx: mpsc::Sender<Gossip>,
+        fingerprint: Vec<u8>,
         initiate: bool,
     ) -> (
         Self,
@@ -126,7 +156,6 @@ impl Peer {
             false => PeerState::Connect,
         }));
 
-        let crypto = Arc::new(RwLock::new(Crypto::new()));
         let packet_number = Arc::new(Mutex::new(0));
         let pending_acks = Arc::new(RwLock::new(HashSet::new()));
 
@@ -140,6 +169,7 @@ impl Peer {
                 peers.clone(),
                 packet_number.clone(),
                 pending_acks.clone(),
+                gossip_tx.clone(),
             )
         });
 
@@ -163,6 +193,8 @@ impl Peer {
                 crypto,
                 peers,
                 username,
+                peername: None,
+                fingerprint,
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -180,7 +212,6 @@ impl Peer {
 
     /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
     /// For distributing gossip check Socket class instead.
-    ///
     /// TODO: Sign the gossip packet's contents with our private key
     pub async fn send_gossip_single(
         &mut self,
@@ -192,10 +223,13 @@ impl Peer {
             source: self.username.clone(),
             message_type: Some(message),
         };
-        // TODO: Sign internal
+        let signature = {
+            let mut crypto = self.crypto.read().await;
+            crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+        };
         let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
-                signature: vec![],
+                signature: signature,
                 signed_data: Some(internal),
             }),
         });
@@ -243,11 +277,27 @@ impl Peer {
         &mut self,
         signed_packet: crypto::v1::SignedPacket,
         app_inbound_tx: mpsc::Sender<ProtocolPacket>,
+        remote_addr: SocketAddr,
+        gossip_tx: mpsc::Sender<Gossip>,
     ) -> Result<bool, PeerError> {
-        let signed_data = signed_packet.signed_data.unwrap();
+        let signature = signed_packet.signature;
+        let signed_data = signed_packet.signed_data.ok_or(PeerError::BadPacket)?;
+        debug!("dispatching gossip {:?}", signed_data.clone());
+
+        let cloned_signed_data = signed_data.clone();
+        let source = signed_data.source;
         let mut forward = false;
-        if signed_data.destination == self.username {
-            let source = signed_data.source;
+        let dest = signed_data.destination;
+
+        if dest == self.username {
+            {
+                let mut crypto_obj = self.crypto.write().await;
+                crypto_obj.verify_data(
+                    &source,
+                    &signature,
+                    &try_encode_internal_packet(&cloned_signed_data)?
+                )?;
+            }
             match signed_data.message_type {
                 Some(MessageType::KeyExchange(dr)) => {
                     let mut crypto_obj = self.crypto.write().await;
@@ -278,7 +328,6 @@ impl Peer {
                         }
                     }
                 }
-                Some(MessageType::CertExchange(_cert)) => todo!(),
                 Some(MessageType::EncryptedPacket(enc)) => {
                     let bytes = {
                         let mut crypto = self.crypto.write().await;
@@ -291,11 +340,90 @@ impl Peer {
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
                 }
+                Some(MessageType::PubkeyRequest(_)) => unreachable!(),
+                Some(MessageType::PubkeyReply(reply)) => {
+                    // TODO: forward reply to those asking in reply_to
+                    let tosend = {
+                        let mut crypto_obj = self.crypto.write().await;
+                        crypto_obj.insert_pubkey_reply_to(dest.clone(), None)
+                    };
+                    if tosend.is_some() {
+                        for asking in tosend.unwrap() {
+                            gossip_tx.send(Gossip {
+                                action: GossipAction::SendDirect,
+                                addr: None,
+                                packet: None,
+                                message: Some(MessageType::PubkeyReply(reply.clone())),
+                                dest: None,
+                                dest_sockaddr: Some(asking)
+                            }).await;
+                        }
+                    };
+                    {
+                        let mut crypto_obj = self.crypto.write().await;
+                        crypto_obj.add_pubkey_raw(&reply.pubkey);
+                    }
+                }
                 None => {}
             }
         } else {
             forward = true;
+            match signed_data.message_type {
+                Some(MessageType::KeyExchange(_))
+                | Some(MessageType::EncryptedPacket(_)) => {}
+                Some(MessageType::PubkeyRequest(..)) => {
+                    forward = false;
+                    let mut crypto_obj = self.crypto.write().await;
+                    let pubkey = crypto_obj.lookup_pubkey(dest.clone());
+                    if pubkey.is_some() {
+                        let armored = pubkey.unwrap().to_armored_bytes(None).map_err(SigError::PGPFail)?;
+                        drop(crypto_obj);
+                        if self.peername.is_some() {
+                            self.send_gossip_single(MessageType::PubkeyReply(
+                            crypto::v1::PubkeyReply {
+                                owner: dest.clone(),
+                                pubkey: armored
+                            }), self.peername.clone().unwrap()).await?;
+                        }
+                    }
+                    else {
+                        let tosend = crypto_obj.insert_pubkey_reply_to(dest.clone(), Some(remote_addr.clone()));
+                        drop(crypto_obj);
+                        // len == 1 means only our remote_addr
+                        if tosend.is_some() && tosend.unwrap().len() == 1 {
+                            self.send_gossip_single(MessageType::PubkeyRequest(
+                                crypto::v1::PubkeyRequest {}
+                            ), dest).await?;
+                        }
+                    }
+                }
+                Some(MessageType::PubkeyReply(_)) => unreachable!(),
+                None => {}
+            }
         }
         Ok(forward)
+    }
+
+    async fn send_pubkey(&mut self) -> Result<(), PeerError> {
+        let armored = self.crypto.read().await.get_self_pubkey()?;
+        self.send_packet(ProtocolPacket {
+            packet_type: Some(ProtocolPacketType::PktPeerpubexchange(
+                crypto::v1::PeerPubKeyExchange {
+                    pubkey: armored
+                }
+            )),
+        }).await?;
+        Ok(())
+    }
+
+    async fn add_peer_pubkey(&mut self, pubkey_bytes: &Vec<u8>) -> Result<(), PeerError> {
+        let peername = self.crypto.write().await.try_add_peer_pubkey(
+            self.remote_addr.clone(),
+            pubkey_bytes,
+            &self.fingerprint
+        )?;
+        // If we get here, fingerprint verified peer's pubkey
+        self.peername = Some(peername);
+        Ok(())
     }
 }
