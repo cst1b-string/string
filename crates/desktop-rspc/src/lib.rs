@@ -1,15 +1,20 @@
 //! Defines the RSPC router for the desktop application.
 
+mod channel;
 mod message;
 mod settings;
+mod user;
 
 use std::{path::Path, sync::Arc};
 
+use channel::attach_channel_queries;
 use message::attach_message_queries;
 use rspc::{Config, Router};
 use settings::{attach_settings_queries, SettingsContext};
 use string_comm::Socket;
 use thiserror::Error;
+use tracing::info;
+use user::attach_user_queries;
 
 /// The context type for the router.
 pub struct Context {
@@ -32,11 +37,28 @@ pub enum ContextError {
 
 impl Context {
     /// Create a new context with the given socket.
-    pub async fn from_socket(socket: Socket) -> Result<Self, ContextError> {
+    pub async fn from<P: AsRef<Path>>(socket: Socket, data_dir: P) -> Result<Self, ContextError> {
+        info!("- Data directory: {:?}", data_dir.as_ref());
+
+        // create sqlite path
+        let sqlite_path = format!(
+            "file://{}",
+            data_dir
+                .as_ref()
+                .join("cache.sqlite")
+                .to_str()
+                .expect("invalid path")
+        );
+        info!("- SQLite path: {:?}", sqlite_path);
+
+        // create settings path
+        let settings_path = data_dir.as_ref().join("settings.json");
+        info!("- Settings path: {:?}", settings_path);
+
         Ok(Self {
             socket,
-            cache: cache_prisma::new_client().await?,
-            settings_ctx: SettingsContext::from_path("./settings.json").await?,
+            cache: cache_prisma::new_client_with_url(&sqlite_path).await?,
+            settings_ctx: SettingsContext::from_path(settings_path).await?,
         })
     }
 }
@@ -65,6 +87,8 @@ fn build_router_with<P: AsRef<Path>>(bindings: Option<P>) -> Router<Ctx> {
     // attach queries
     let builder = attach_settings_queries(builder);
     let builder = attach_message_queries(builder);
+    let builder = attach_channel_queries(builder);
+    let builder = attach_user_queries(builder);
 
     builder.build()
 }

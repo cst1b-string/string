@@ -2,20 +2,30 @@
 
 export type Procedures = {
     queries: 
+        { key: "channel.list", input: never, result: Channel[] } | 
+        { key: "channel.messages", input: number, result: Message[] } | 
         { key: "message.list", input: ListMessageArgs, result: Message[] } | 
-        { key: "settings.theme", input: never, result: Theme },
+        { key: "settings.theme", input: never, result: Theme } | 
+        { key: "user.list", input: number, result: User[] },
     mutations: 
+        { key: "channel.create", input: CreateChannelArgs, result: Channel } | 
         { key: "message.send", input: string, result: null } | 
         { key: "settings.theme", input: Theme, result: null },
     subscriptions: never
 };
+
+export type Message = { id: number; content: string; timestamp: string; authorId: number; channelId: number }
+
+export type CreateChannelArgs = { title: string; network_id: number }
 
 /**
  * Arguments for the list messages query.
  */
 export type ListMessageArgs = { after: number | null }
 
-export type Message = { id: number; content: string; author: string; timestamp: string }
+export type Channel = { id: number; title: string; networkId: number }
+
+export type User = { id: number; username: string; networkId: number }
 
 /**
  * The theme of the application.

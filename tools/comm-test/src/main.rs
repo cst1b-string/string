@@ -115,35 +115,35 @@ async fn main() {
     loop {
         let mut input = String::new();
 
-        if (io::stdin().read_line(&mut input)).is_ok() {
-            let mut trimmed = input.trim();
-            if trimmed.starts_with('/') {
-                trimmed = &trimmed[1..];
-                if let Some((prefix, rest)) = trimmed.split_once(' ') {
-                    if prefix == "dr" {
-                        let _ = socket.start_dr(rest.to_string()).await;
-                    } else if prefix == "msg" {
-                        if let Some((destination, message)) = rest.split_once(' ') {
-                            let message = messages::v1::Message {
-                                id: "test-id".to_string(),
-                                channel_id: "test-channel".to_string(),
-                                username: username.to_string(),
-                                content: message.to_string(),
-                                attachments: vec![],
-                            };
-                            let packet = ProtocolPacket {
-                                packet_type: Some(ProtocolPacketType::PktMessage(message)),
-                            };
-                            let _ = Socket::send_gossip_encrypted(
-                                packet,
-                                socket.peers.clone(),
-                                destination.to_string(),
-                            )
-                            .await;
-                        }
-                    }
-                }
-            }
-        }
+        // if (io::stdin().read_line(&mut input)).is_ok() {
+        //     let mut trimmed = input.trim();
+        //     if trimmed.starts_with('/') {
+        //         trimmed = &trimmed[1..];
+        //         if let Some((prefix, rest)) = trimmed.split_once(' ') {
+        //             if prefix == "dr" {
+        //                 let _ = socket.start_dr(rest.to_string()).await;
+        //             } else if prefix == "msg" {
+        //                 if let Some((destination, message)) = rest.split_once(' ') {
+        //                     let message = messages::v1::Message {
+        //                         id: "test-id".to_string(),
+        //                         channel_id: "test-channel".to_string(),
+        //                         username: username.to_string(),
+        //                         content: message.to_string(),
+        //                         attachments: vec![],
+        //                     };
+        //                     let packet = ProtocolPacket {
+        //                         packet_type: Some(ProtocolPacketType::PktMessage(message)),
+        //                     };
+        //                     let _ = Socket::send_gossip_encrypted(
+        //                         packet,
+        //                         socket.peers.clone(),
+        //                         destination.to_string(),
+        //                     )
+        //                     .await;
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 }

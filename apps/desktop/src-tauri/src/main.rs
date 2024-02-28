@@ -10,14 +10,18 @@ use tracing_subscriber::EnvFilter;
 async fn main() {
     // intialize logging
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .pretty()
+        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();
     info!(
         "Starting {} v{}",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     );
+
+    // build tauri app
+    let app = tauri::Builder::default()
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application");
 
     // rspc router for communicating with frontend
     let router = desktop_rspc::build_router();
@@ -31,26 +35,28 @@ async fn main() {
         .await
         .expect("failed to bind socket");
 
-    // create cache client
-    info!("Creating cache client...");
-    let cache = cache_prisma::new_client()
-        .await
-        .expect("failed to create cache client");
+    // get app data dir and create it if it doesn't exist
+    let data_dir = app.handle().path_resolver().app_data_dir().unwrap();
+    std::fs::create_dir_all(&data_dir).expect("failed to create app data directory");
 
     // create context
+    info!("Creating application context...");
     let ctx = desktop_rspc::Ctx::new(
-        Context::from_socket(socket)
+        Context::from(socket, data_dir)
             .await
             .expect("failed to create context"),
     );
 
-    // build tauri app
-    tauri::Builder::default()
-        // rspc plugin - for communicating with frontend
+    // add rspc plugin
+    app.handle()
         .plugin(rspc::integrations::tauri::plugin(
             router.into(),
             move || ctx.clone(),
         ))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("failed to add rspc plugin");
+
+    // start the app
+    app.run(|_, event| match event {
+        _ => {}
+    })
 }
