@@ -49,7 +49,7 @@ fn generate_key(username: String, password: String) -> SignedSecretKey {
         .key_type(KeyType::Rsa(2048))
         .can_certify(false)
         .can_sign(true)
-        .primary_user_id(username.into())
+        .primary_user_id(username)
         .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256,])
         .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_256,])
         .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB,]);
@@ -61,10 +61,10 @@ fn generate_key(username: String, password: String) -> SignedSecretKey {
         .generate()
         .expect("Failed to generate a plain key.");
     let passwd_fn = || password;
-    let signed_secret_key = secret_key
+
+    secret_key
         .sign(passwd_fn)
-        .expect("Must be able to sign its own metadata");
-    signed_secret_key
+        .expect("Must be able to sign its own metadata")
 }
 
 fn load_key(location: &String) -> Option<SignedSecretKey> {
