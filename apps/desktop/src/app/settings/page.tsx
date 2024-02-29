@@ -23,6 +23,22 @@ export function handleUsernameChange(e: React.FormEvent<HTMLInputElement>) {
 
 }
 
+export function set_bio(bio: string) {} //placeholder
+
+export function handleBioSubmit() {
+	set_username(usernameState);
+}
+
+export function handleBioChange(e: React.FormEvent<HTMLTextAreaElement>) {
+
+	setUsernameState(e.currentTarget.value);
+
+}
+
+export function toggleLightMode(lightMode: boolean) {
+	//backend call
+}
+
 export default function Home() {
 
 	const lightModeComposite = useContext(themeContext);
@@ -45,7 +61,7 @@ export default function Home() {
 			<div className="py-5 w-1/3 space-y-1">
 				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
 
-					<button onClick={() => lightModeComposite.setLightMode(true)}>
+					<button onClick={() => toggleLightMode(!lightMode)}>
 						<h1> {lightModeText} </h1>
 					</button>
 
@@ -65,7 +81,7 @@ export default function Home() {
 				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
 
 					<h1 className="px-1"> User Bio: </h1>
-					<textarea className="bg-[#113355] px-1 resize-none" rows={5} defaultValue={Bio}/>
+					<textarea className="bg-[#113355] px-1 resize-none" rows={5} defaultValue={Bio} onChange={handleBioChange}/>
 
 					<button className="px-1 py-5 bg-black rounded-md" onClick={() => false}>
 						<h1> Submit </h1>
