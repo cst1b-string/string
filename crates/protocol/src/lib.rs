@@ -72,6 +72,8 @@ pub type ProtocolPacketType = packet::v1::packet::PacketType;
 /// A type alias for [crypto::v1::signed_packet_internal::MessageType], useful for disambiguating message types in Gossip packets
 pub type MessageType = crypto::v1::signed_packet_internal::MessageType;
 
+pub type AttachmentType = messages::v1::message_attachment::AttachmentType;
+
 /// An error that can occur when decoding a packet.
 #[derive(Debug, Error)]
 pub enum PacketDecodeError {
