@@ -4,8 +4,25 @@ import { useContext, useMemo, useState } from "react";
 
 import { ThemeContext } from "../layout";
 
+import { useRspc } from "@/integration";
+
 export default function Home() {
-	const { lightMode, setLightMode } = useContext(ThemeContext);
+
+	const rspc = useRspc();
+	const theme = rspc.useQuery(["settings.theme"]);
+
+	var initial_theme;
+
+	if (theme.data == "Light") {
+		initial_theme = true;
+	}
+	else {
+		initial_theme = false;
+	}
+
+	const [lightMode, setLightMode] = useState(initial_theme);
+
+	//const { lightMode, setLightMode } = useContext(ThemeContext);
 
 	const lightModeText = useMemo(() => (lightMode ? "Dark Mode" : "Light Mode"), [lightMode]);
 
