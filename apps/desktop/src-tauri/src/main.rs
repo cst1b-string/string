@@ -8,6 +8,8 @@ use string_comm::{Socket, DEFAULT_PORT};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use crate::crypto::generate_key;
+
 #[tokio::main]
 async fn main() {
     // intialize logging
@@ -28,12 +30,16 @@ async fn main() {
     // rspc router for communicating with frontend
     let router = desktop_rspc::build_router();
 
+    // crenerate example key
+    info!("Generating example key...");
+    let key = generate_key("Example".to_string(), "password".to_string());
+
     // bind to socket
     info!(
         "Launching socket listener on {}:{}",
         "127.0.0.1", DEFAULT_PORT
     );
-    let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into(), "desktop".into())
+    let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into(), key)
         .await
         .expect("failed to bind socket");
 
@@ -58,7 +64,5 @@ async fn main() {
         .expect("failed to add rspc plugin");
 
     // start the app
-    app.run(|_, event| match event {
-        _ => {}
-    })
+    app.run(|_, _| {})
 }
