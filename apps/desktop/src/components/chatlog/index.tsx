@@ -31,44 +31,35 @@ export default function ChatLog() {
 				contain: "strict",
 			}}
 		>
-			{/* <div className="overflow-y-auto h-full"> */}
+			<div
+				className = "relative w-full"
+				style={{
+					height: virtualizer.getTotalSize(),
+				}}
+			>
 				<div
-					className = "relative w-full"
+					className="absolute top-0 left-0 w-full"
 					style={{
-						height: virtualizer.getTotalSize(),
+						transform: `translateY(${items[0]?.start ?? 0}px)`,
 					}}
 				>
-					<div
-						className="absolute top-0 left-0 w-full"
-						style={{
-							transform: `translateY(${items[0]?.start ?? 0}px)`,
-						}}
-					>
-						{items.map((virtualRow) => (
-							<div
-								key={virtualRow.key}
-								// style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
-								data-index={virtualRow.index}
-								ref={virtualizer.measureElement}
-								className={`${virtualRow.index % 2 === 0 ? "bg-darkGrey" : "bg-navbarGrey"}`}
-							>
-								<div className="py-2.5 relative w-11/12 left-2.5p">
-									<div className="font-bold display-inline">User {virtualRow.index % 2 ? "1" : "2"}: </div>
-									<div className="font-normal">
-										{sentences[virtualRow.index]} </div>
-								</div>
+					{items.map((virtualRow) => (
+						<div
+							key={virtualRow.key}
+							// style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
+							data-index={virtualRow.index}
+							ref={virtualizer.measureElement}
+							className={`${virtualRow.index % 2 === 0 ? "bg-darkGrey" : "bg-navbarGrey"}`}
+						>
+							<div className="py-2.5 relative w-11/12 left-2.5p">
+								<div className="font-bold display-inline">User {virtualRow.index % 2 ? "1" : "2"}: </div>
+								<div className="font-normal">
+									{sentences[virtualRow.index]} </div>
 							</div>
-						))}
-					</div>
+						</div>
+					))}
 				</div>
-			{/* </div> */}
-			{/* <div className="w-full">
-				<input
-					type="text"
-					className="w-full"
-					placeholder="message here..."
-				/>
-			</div> */}
+			</div>
 		</div>
 	); //Amaan
 }

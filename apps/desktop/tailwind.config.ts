@@ -9,6 +9,7 @@ const config: Config = {
 	theme: {
 		extend: {
 			colors: {
+				// 383a40
 				lightGrey: "#383838",
 				hoverLightGrey: "#515151",
 				darkGrey: "#16181b",
@@ -17,6 +18,9 @@ const config: Config = {
 			},
 			height: {
 				"90p": "90%",
+			},
+			width: {
+				"90p": "90%"
 			},
 			inset: {
 				"2.5p": "2.5%",

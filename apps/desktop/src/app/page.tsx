@@ -21,6 +21,14 @@ export default function Home() {
 
 				<div className="text-white font-bold flex-grow">
 					<ChatLog />
+					{/* send messages */}
+					<div className="px-4">
+						<input
+							type="text"
+							className="w-90p h-10 px-6 rounded-xl bg-lightGrey font-normal"
+							placeholder="message here"
+						/>
+					</div>
 				</div>
 			</div>
 		</themeContext.Provider>
