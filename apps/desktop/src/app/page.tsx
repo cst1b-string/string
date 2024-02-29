@@ -2,6 +2,7 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
+import Textarea from "@mui/joy/Textarea";
 import { createContext, useState } from "react";
 
 export const themeContext = createContext({
@@ -21,6 +22,15 @@ export default function Home() {
 
 				<div className="col-span-2 text-white font-bold ">
 					<ChatLog />
+					<div style={{ padding: "10px 0", position: "relative", left: "1%", width: "95%" }}>
+						<Textarea
+							placeholder="Type a message here..."
+							color="neutral"
+							maxRows={3}
+							variant="soft"
+							className="input"
+						/>
+					</div>
 				</div>
 			</div>
 		</themeContext.Provider>
