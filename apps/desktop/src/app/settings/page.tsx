@@ -13,8 +13,8 @@ export default function Home() {
 	const [bio, setBio] = useState("<Bio from Tauri>");
 
 	return (
-		<div className="flex flex-row justify-center py-5 w-full ">
-			<div className="flex flex-col space-y-4 w-1/3">
+		<div className="flex flex-row justify-center py-5">
+			<div className="flex flex-col space-y-4 w-[600px]">
 				<div className="flex  justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
 					<button onClick={() => setLightMode(!lightMode)}>{lightModeText}</button>
 				</div>
