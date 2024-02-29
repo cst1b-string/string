@@ -6,7 +6,7 @@ import React from "react";
 
 import "./chat.css";
 
-const sentences = new Array(1000).fill(true).map(() => faker.lorem.sentence({ min: 10, max: 30 })); // "The same sentence over and over again."); //
+const sentences = new Array(100).fill(true).map(() => faker.lorem.sentence({ min: 10, max: 30 })); // "The same sentence over and over again."); //
 
 export default function ChatLog() {
 	const parentRef = React.useRef<HTMLDivElement>(null);
@@ -27,41 +27,35 @@ export default function ChatLog() {
 	return (
 		<div
 			ref={parentRef}
-			className="List"
+			// className="List"
+			// 90p defined in tailwind.config.ts
+			className = "List relative h-90p overflow-y-auto"
 			style={{
-				position: "relative",
-				//left: "2.5%",
-				height: "90%",
-				//width: "85%",
-				overflowY: "auto",
+				// overflowY: "auto",
 				contain: "strict",
 			}}
 		>
 			<div
+				className = "relative w-full"
 				style={{
 					height: virtualizer.getTotalSize(),
-					width: "100%",
-					position: "relative",
 				}}
 			>
 				<div
+					className="absolute top-0 left-0 w-full"
 					style={{
-						position: "absolute",
-						top: 0,
-						left: 0,
-						width: "100%",
 						transform: `translateY(${items[0]?.start ?? 0}px)`,
 					}}
 				>
 					{items.map((virtualRow) => (
 						<div
 							key={virtualRow.key}
-							style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
+							// style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
 							data-index={virtualRow.index}
 							ref={virtualizer.measureElement}
-							className={virtualRow.index % 2 ? "ListItemOdd" : "ListItemEven"}
+							className={`${virtualRow.index % 2 === 0 ? "bg-darkGrey" : "bg-navbarGrey"}`}
 						>
-							<div style={{ padding: "10px 0", position: "relative", left: "2.5%", width: "85%" }}>
+							<div className="py-2.5 relative w-11/12 left-2.5p">
 								<div className="user">User {virtualRow.index % 2 ? "1" : "2"}: </div>
 								<div className="chat">{sentences[virtualRow.index]} </div>
 							</div>

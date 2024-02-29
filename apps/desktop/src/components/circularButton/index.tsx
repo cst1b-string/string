@@ -5,7 +5,7 @@ export const CircularChatButton: React.FC<{chatName: string}> = ({chatName}) => 
 	// specific case for new chat button (because it has a different colour)
 	if (chatName == "+"){
 		return (
-			<Link href="./newChat" className="flex justify-center items-center w-14 h-14 rounded-full bg-lightGrey hover:bg-discordGreen text-discordGreen hover:text-white text-4xl">
+			<Link href="./newChat" className="text-center w-14 h-14 rounded-xl bg-lightGrey hover:bg-discordGreen text-discordGreen hover:text-white text-4xl">
 				+
 			</Link>
 		)
@@ -17,7 +17,9 @@ export const CircularChatButton: React.FC<{chatName: string}> = ({chatName}) => 
 		let innerText = chatNameInWords.map(word => 
 			word.charAt(0)).join("")
 		return (
-			<Link href={chatName} className="flex justify-center items-center w-14 h-14 rounded-full bg-lightGrey hover:bg-hoverLightGrey text-white text-xl">
+			<Link href={chatName} 
+			// className="text-center w-14 h-14 rounded-xl bg-lightGrey hover:bg-hoverLightGrey text-white text-xl">
+			className="flex items-center justify-center w-14 h-14 rounded-xl bg-lightGrey hover:bg-hoverLightGrey text-white text-xl">
 				{innerText}
 			</Link>
 		)

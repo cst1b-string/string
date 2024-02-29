@@ -15,6 +15,12 @@ const config: Config = {
 				discordGreen: "#23a559",
 				navbarGrey: "#202327",
 			},
+			height: {
+				"90p": "90%",
+			},
+			inset: {
+				"2.5p": "2.5%",
+			},
 			backgroundImage: {
 				"gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
 				"gradient-conic": "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
