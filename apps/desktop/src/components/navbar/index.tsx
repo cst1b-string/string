@@ -6,7 +6,7 @@ export const Navbar = () => {
 		<div className="w-full h-20 bg-[#191970] sticky top-0">
         <div className="container mx-auto px-4 h-full">
           <div className="flex justify-between items-center h-full">
-            <Logo />
+            < Logo />
 			< SettingsButton />
           </div>
         </div>
