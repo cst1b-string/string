@@ -3,12 +3,12 @@ use smallvec::*;
 use std::{
     env,
     fs::File,
-    io::{self, Write},
+    io::{self, Read, Write},
     net::SocketAddr,
     time::Duration,
 };
 use string_comm::{peer::PeerState, Socket};
-use string_protocol::{messages, ProtocolPacket, ProtocolPacketType};
+use string_protocol::{messages, AttachmentType, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
@@ -19,6 +19,8 @@ use pgp::{
     types::{CompressionAlgorithm, KeyTrait, SecretKeyTrait},
     Deserializable,
 };
+
+use image::{guess_format, ImageFormat};
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -89,6 +91,42 @@ fn get_key_path() -> String {
     let cwd = env::current_dir().expect("Failed to get current dir");
     let cwd_str = cwd.to_str().expect("Failed to convert dir to string");
     format!("{cwd_str}/key.asc")
+}
+
+fn construct_image(image_data: &Vec<u8>) -> messages::v1::MessageAttachment {
+    let format = match guess_format(image_data.as_slice()).unwrap_or(ImageFormat::Png) {
+        ImageFormat::Png => messages::v1::ImageFormat::Png,
+        ImageFormat::Jpeg => messages::v1::ImageFormat::Jpeg,
+        ImageFormat::Gif => messages::v1::ImageFormat::Gif,
+        ImageFormat::WebP => messages::v1::ImageFormat::Webp,
+        _ => messages::v1::ImageFormat::Unspecified,
+    };
+    messages::v1::MessageAttachment {
+        attachment_type: Some(AttachmentType::Image(messages::v1::ImageAttachment {
+            format: format.into(),
+            data: image_data.clone(),
+        })),
+    }
+}
+
+fn display_attachments(username: String, attachments: Vec<messages::v1::MessageAttachment>) {
+    if !attachments.is_empty() {
+        info!("<{0}>: ", username);
+    }
+    for iter in attachments {
+        if let Some(attachment) = iter.attachment_type {
+            match attachment {
+                AttachmentType::Image(messages::v1::ImageAttachment { format: _, data }) => {
+                    if let Ok(img) = image::load_from_memory(&data) {
+                        let config = &artem::config::ConfigBuilder::new().build();
+                        let ascii = artem::convert(img, config);
+                        println!("{}", ascii);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -205,7 +243,8 @@ async fn main() {
                 if let Ok(recv) = app_inbound_rx.try_recv() {
                     match recv.packet_type {
                         Some(ProtocolPacketType::PktMessage(m)) => {
-                            info!("<{0}>: {1}", m.username, m.content);
+                            info!("<{0}>: {1}", m.username.clone(), m.content);
+                            display_attachments(m.username, m.attachments);
                         }
                         Some(_) => {}
                         None => {}
@@ -243,6 +282,29 @@ async fn main() {
                             let _ = socket
                                 .send_gossip_encrypted(packet, destination.to_string())
                                 .await;
+                        }
+                    } else if prefix == "msgimg" {
+                        if let Some((destination, image_path)) = rest.split_once(' ') {
+                            if let Ok(mut image_file) = File::open(image_path) {
+                                let mut image_data = Vec::new();
+                                if image_file.read_to_end(&mut image_data).is_ok() {
+                                    let img = construct_image(&image_data);
+                                    let message = messages::v1::Message {
+                                        id: "test-id".to_string(),
+                                        channel_id: "test-channel".to_string(),
+                                        username: username.to_string(),
+                                        content: "".to_string(),
+                                        attachments: vec![img],
+                                        time_sent: None,
+                                    };
+                                    let packet = ProtocolPacket {
+                                        packet_type: Some(ProtocolPacketType::PktMessage(message)),
+                                    };
+                                    let _ = socket
+                                        .send_gossip_encrypted(packet, destination.to_string())
+                                        .await;
+                                }
+                            }
                         }
                     }
                 }
