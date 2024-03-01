@@ -19,7 +19,7 @@ pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
 pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
 
 /// The maximum size of a UDP datagram.
-pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
+pub const UDP_MAX_DATAGRAM_SIZE: usize = 40_000;
 
 /// A UDP packet sent over the network. These packets have the following format:
 ///
