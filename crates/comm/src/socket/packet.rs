@@ -56,6 +56,7 @@ impl Eq for SocketPacket {}
 
 // TODO: Justify that packet_number and chunk_number will be unique.
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for SocketPacket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         //  enforces lexicographic ordering, with packet number taking precedence

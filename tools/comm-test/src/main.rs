@@ -1,37 +1,26 @@
 use clap::Parser;
+use smallvec::*;
 use std::{
-    io::{self, Write, Read},
-    net::SocketAddr, 
-    time::Duration,
-    fs::File,
     env,
-    path::PathBuf
+    fs::File,
+    io::{self, Read, Write},
+    net::SocketAddr,
+    time::Duration,
 };
 use string_comm::{peer::PeerState, Socket};
-use string_protocol::{messages, ProtocolPacket, ProtocolPacketType, AttachmentType};
+use string_protocol::{messages, AttachmentType, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
-use smallvec::*;
 
 use pgp::{
-    composed::{
-        KeyType,
-        KeyDetails,
-        SecretKey,
-        SecretSubkey,
-        key::SecretKeyParamsBuilder,
-        SignedSecretKey
-    },
-    errors::Result,
-    packet::{KeyFlags, UserAttribute, UserId},
-    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
-    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
-    Deserializable
+    composed::{key::SecretKeyParamsBuilder, KeyType, SignedSecretKey},
+    crypto::{hash::HashAlgorithm, sym::SymmetricKeyAlgorithm},
+    types::{CompressionAlgorithm, KeyTrait, SecretKeyTrait},
+    Deserializable,
 };
 
-use image::{load_from_memory, guess_format, ImageFormat};
-use artem::*;
+use image::{guess_format, ImageFormat};
 
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
@@ -57,38 +46,44 @@ struct Args {
 fn generate_key(username: String, password: String) -> SignedSecretKey {
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
-    .key_type(KeyType::Rsa(2048))
-    .can_certify(false)
-    .can_sign(true)
-    .primary_user_id(username.into())
-    .preferred_symmetric_algorithms(smallvec![
-        SymmetricKeyAlgorithm::AES256,
-    ])
-    .preferred_hash_algorithms(smallvec![
-        HashAlgorithm::SHA2_256,
-    ])
-    .preferred_compression_algorithms(smallvec![
-        CompressionAlgorithm::ZLIB,
-    ]);
+        .key_type(KeyType::Rsa(2048))
+        .can_certify(false)
+        .can_sign(true)
+        .primary_user_id(username)
+        .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256,])
+        .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_256,])
+        .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB,]);
 
-    let secret_key_params = key_params.build().expect("Must be able to create secret key params");
-    let secret_key = secret_key_params.generate().expect("Failed to generate a plain key.");
+    let secret_key_params = key_params
+        .build()
+        .expect("Must be able to create secret key params");
+    let secret_key = secret_key_params
+        .generate()
+        .expect("Failed to generate a plain key.");
     let passwd_fn = || password;
-    let signed_secret_key = secret_key.sign(passwd_fn).expect("Must be able to sign its own metadata");
-    signed_secret_key
+    secret_key
+        .sign(passwd_fn)
+        .expect("Must be able to sign its own metadata")
 }
 
 fn load_key(location: &String) -> Option<SignedSecretKey> {
-    let Ok(mut file) = File::open(&location) else { return None; };
-    let Ok((key, _headers)) = SignedSecretKey::from_armor_single(&mut file) else { return None; };
+    let Ok(mut file) = File::open(location) else {
+        return None;
+    };
+    let Ok((key, _headers)) = SignedSecretKey::from_armor_single(&mut file) else {
+        return None;
+    };
     Some(key)
 }
 
 fn save_key(location: &String, key: SignedSecretKey) {
     let mut file = File::create(location).expect("Error opening privkey file");
     file.write_all(
-        key.to_armored_string(None).expect("Error generating armored string").as_bytes()
-    ).expect("Error writing privkey");
+        key.to_armored_string(None)
+            .expect("Error generating armored string")
+            .as_bytes(),
+    )
+    .expect("Error writing privkey");
 }
 
 fn get_key_path() -> String {
@@ -106,34 +101,25 @@ fn construct_image(image_data: &Vec<u8>) -> messages::v1::MessageAttachment {
         _ => messages::v1::ImageFormat::Unspecified,
     };
     messages::v1::MessageAttachment {
-        attachment_type: Some(
-            AttachmentType::Image (
-                messages::v1::ImageAttachment {
-                    format: format.into(),
-                    data: image_data.clone()
-                }
-            )
-        )
+        attachment_type: Some(AttachmentType::Image(messages::v1::ImageAttachment {
+            format: format.into(),
+            data: image_data.clone(),
+        })),
     }
 }
 
 fn display_attachments(username: String, attachments: Vec<messages::v1::MessageAttachment>) {
-    if !attachments.is_empty() { info!("<{0}>: ", username); }
+    if !attachments.is_empty() {
+        info!("<{0}>: ", username);
+    }
     for iter in attachments {
-        if let Some(attachment) = iter.attachment_type {
-            match attachment {
-                AttachmentType::Image (
-                    messages::v1::ImageAttachment {
-                        format, data
-                    }
-                ) => {
-                    if let Ok(img) = image::load_from_memory(&data) {
-                        let config = &artem::config::ConfigBuilder::new().build();
-                        let ascii = artem::convert(img, config);
-                        println!("{}", ascii);
-                    }
-                }
-                _ => {}
+        if let Some(AttachmentType::Image(messages::v1::ImageAttachment { format: _, data })) =
+            iter.attachment_type
+        {
+            if let Ok(img) = image::load_from_memory(&data) {
+                let config = &artem::config::ConfigBuilder::new().build();
+                let ascii = artem::convert(img, config);
+                println!("{}", ascii);
             }
         }
     }
@@ -147,7 +133,7 @@ async fn main() {
         addrs: peer_addrs,
         fingerprints,
         username,
-        generate
+        generate,
     } = Args::parse();
 
     // initialise tracing
@@ -178,13 +164,19 @@ async fn main() {
     }
 
     info!("[+] Key loaded!");
-    info!("[+] Fingerprint: {0}", hex::encode(secret_key.public_key().fingerprint()));
+    info!(
+        "[+] Fingerprint: {0}",
+        hex::encode(secret_key.public_key().fingerprint())
+    );
 
     // Only generate key
-    if generate { return; }
+    if generate {
+        return;
+    }
 
     // bind to the socket
-    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port.unwrap()).into(), secret_key).await {
+    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port.unwrap()).into(), secret_key).await
+    {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -198,7 +190,8 @@ async fn main() {
 
     for (i, peer_addr) in peer_addrs.iter().enumerate() {
         let fingerprint = hex::decode(&fingerprints[i]).expect("Invalid fingerprint format");
-        let (app_outbound_tx, app_inbound_rx) = socket.add_peer(*peer_addr, fingerprint, initiate).await;
+        let (app_outbound_tx, app_inbound_rx) =
+            socket.add_peer(*peer_addr, fingerprint, initiate).await;
         senders.push(app_outbound_tx);
         receivers.push(app_inbound_rx);
     }
@@ -281,15 +274,13 @@ async fn main() {
                             let packet = ProtocolPacket {
                                 packet_type: Some(ProtocolPacketType::PktMessage(message)),
                             };
-                            let _ = socket.send_gossip_encrypted(
-                                packet,
-                                destination.to_string(),
-                            )
-                            .await;
+                            let _ = socket
+                                .send_gossip_encrypted(packet, destination.to_string())
+                                .await;
                         }
                     } else if prefix == "msgimg" {
                         if let Some((destination, image_path)) = rest.split_once(' ') {
-                            if let Ok(mut image_file) = File::open(image_path.clone()) {
+                            if let Ok(mut image_file) = File::open(image_path) {
                                 let mut image_data = Vec::new();
                                 if image_file.read_to_end(&mut image_data).is_ok() {
                                     let img = construct_image(&image_data);
@@ -303,11 +294,9 @@ async fn main() {
                                     let packet = ProtocolPacket {
                                         packet_type: Some(ProtocolPacketType::PktMessage(message)),
                                     };
-                                    let _ = socket.send_gossip_encrypted(
-                                        packet,
-                                        destination.to_string(),
-                                    )
-                                    .await;
+                                    let _ = socket
+                                        .send_gossip_encrypted(packet, destination.to_string())
+                                        .await;
                                 }
                             }
                         }

@@ -37,7 +37,7 @@ pub enum SocketError {
     NoPeer,
     /// Generic certificate errors
     #[error("Generic certificate error")]
-    CertError
+    CertError,
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
