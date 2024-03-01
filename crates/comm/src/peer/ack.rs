@@ -34,7 +34,7 @@ pub fn start_ack_timeout_worker(
             _ = async {
                 loop {
                     // wait for 1s before checking if we've received an ACK
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
                     let has_packet = { packet_acks.read().await.contains(&(packet_number, chunk_number))};
                     if !has_packet {
                         break;

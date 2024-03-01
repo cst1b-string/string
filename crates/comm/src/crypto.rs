@@ -2,8 +2,22 @@
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use double_ratchet_rs::{Header, Ratchet};
+use nom::combinator::map;
+use pgp::{
+    composed::{SignedPublicKey, SignedSecretKey},
+    crypto::hash::HashAlgorithm,
+    ser::Serialize,
+    types::{mpi, KeyTrait, PublicKeyTrait, SecretKeyTrait},
+    Deserializable,
+};
 use rand::rngs::OsRng;
-use std::{collections::HashMap, fmt, io::Cursor};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    fmt,
+    io::Cursor,
+    net::SocketAddr,
+};
 use string_protocol::crypto;
 use thiserror::Error;
 use tracing::debug;
@@ -20,6 +34,18 @@ pub enum DoubleRatchetError {
     // Currently generic, todo make more specific
     #[error("Ciphertext is bad")]
     BadCiphertext,
+}
+
+#[derive(Error, Debug)]
+pub enum SigningError {
+    #[error("Fingerprint mismatch")]
+    FingerprintMismatch,
+    #[error("Generic PGP Error")]
+    PgpError(#[from] pgp::errors::Error),
+    #[error("Missing public key for node")]
+    MissingPubKey,
+    #[error("MPI parsing went wrong")]
+    MpiFail,
 }
 
 /// Key exchange process happens as follows:
@@ -70,21 +96,165 @@ pub enum DoubleRatchet {
     },
 }
 
+#[derive(Debug)]
+pub enum PgpPubKey {
+    PeerUninit { fingerprint: Vec<u8> },
+    NodeUninit { reply_to: Vec<SocketAddr> },
+    Initialized { pubkey: SignedPublicKey },
+}
+
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
+    pub pubkeys: HashMap<String, PgpPubKey>,
+    /// Our private key
+    pub secret_key: SignedSecretKey,
 }
 
 impl Crypto {
-    pub fn new() -> Self {
+    pub fn new(secret_key: SignedSecretKey) -> Self {
         Self {
             ratchets: HashMap::new(),
+            pubkeys: HashMap::new(),
+            secret_key,
         }
     }
-}
 
-impl Default for Crypto {
-    fn default() -> Self {
-        Self::new()
+    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, SigningError> {
+        let armored = self
+            .secret_key
+            .public_key()
+            .sign(&self.secret_key, || "testpassword".to_string())?
+            .to_armored_bytes(None)?;
+        Ok(armored)
+    }
+
+    pub fn get_pubkey_username(pubkey: SignedPublicKey) -> String {
+        format!("{0}", pubkey.details.users[0].id.id())
+    }
+
+    pub fn add_pubkey(&mut self, pubkey: SignedPublicKey) -> Result<String, SigningError> {
+        let nodename = Crypto::get_pubkey_username(pubkey.clone());
+        self.pubkeys.insert(
+            nodename.clone(),
+            PgpPubKey::Initialized {
+                pubkey: pubkey.clone(),
+            },
+        );
+        debug!("Got pubkey for {0}", nodename);
+        Ok(nodename)
+    }
+
+    pub fn add_pubkey_raw(&mut self, pubkey_bytes: &Vec<u8>) -> Result<String, SigningError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        self.add_pubkey(pubkey)
+    }
+
+    pub fn try_add_peer_pubkey(
+        &mut self,
+        _peer: SocketAddr,
+        pubkey_bytes: &Vec<u8>,
+        fingerprint: &Vec<u8>,
+    ) -> Result<String, SigningError> {
+        let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
+        if pubkey.fingerprint() == *fingerprint {
+            Ok(self.add_pubkey(pubkey)?)
+        } else {
+            Err(SigningError::FingerprintMismatch)
+        }
+    }
+
+    pub fn lookup_pubkey(&mut self, dest: String) -> Option<SignedPublicKey> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(entry) => match entry.get() {
+                PgpPubKey::Initialized { pubkey } => Some(pubkey.clone()),
+                PgpPubKey::NodeUninit { .. } | PgpPubKey::PeerUninit { .. } => None,
+            },
+            Entry::Vacant(_) => None,
+        };
+        result
+    }
+
+    pub fn insert_pubkey_reply_to(
+        &mut self,
+        dest: String,
+        whos_asking: Option<SocketAddr>,
+    ) -> Option<Vec<SocketAddr>> {
+        let result = match self.pubkeys.entry(dest) {
+            Entry::Occupied(mut entry) => match entry.get_mut() {
+                PgpPubKey::NodeUninit { reply_to } => {
+                    if let Some(who) = whos_asking {
+                        reply_to.push(who);
+                    }
+                    Some(reply_to.clone())
+                }
+                PgpPubKey::Initialized { .. } | PgpPubKey::PeerUninit { .. } => None,
+            },
+            Entry::Vacant(entry) => {
+                let mut reply_to = Vec::new();
+                if let Some(who) = whos_asking {
+                    reply_to.push(who);
+                }
+                entry.insert(PgpPubKey::NodeUninit {
+                    reply_to: reply_to.clone(),
+                });
+                Some(reply_to)
+            }
+        };
+        result
+    }
+
+    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigningError> {
+        // So apparently the official RFC calls for more stuff but this works
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let signature = self.secret_key.create_signature(
+            || "testpassword".to_string(),
+            HashAlgorithm::SHA2_256,
+            digest,
+        )?;
+
+        let mut allbytes: Vec<Vec<u8>> = Vec::new();
+        for mpi in signature {
+            allbytes.push(mpi.to_bytes()?);
+        }
+        Ok(allbytes.concat())
+    }
+
+    pub fn verify_data(
+        &self,
+        source: &String,
+        signature: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), SigningError> {
+        let signed_pub_key = match self
+            .pubkeys
+            .get(source)
+            .ok_or(SigningError::MissingPubKey)?
+        {
+            PgpPubKey::Initialized { pubkey } => pubkey,
+            PgpPubKey::PeerUninit { .. } | PgpPubKey::NodeUninit { .. } => {
+                return Err(SigningError::MissingPubKey);
+            }
+        };
+
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let (_unused, mpi_sig) =
+            map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigningError::MpiFail)?;
+
+        signed_pub_key.verify_signature(HashAlgorithm::SHA2_256, digest, &mpi_sig)?;
+        debug!("signature verified");
+        Ok(())
     }
 }
 

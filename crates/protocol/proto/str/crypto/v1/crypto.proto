@@ -13,8 +13,9 @@ message SignedPacketInternal {
 	string destination = 2;
 	oneof message_type {
 		DRKeyExchange key_exchange = 3;
-		CertExchange cert_exchange = 4;
-		EncryptedPacket encrypted_packet = 5;
+		PubKeyRequest pub_key_request = 4;
+		PubKeyReply pub_key_reply = 5;
+		EncryptedPacket encrypted_packet = 6;
 	}
 }
 message SignedPacket {
@@ -29,8 +30,16 @@ message DRKeyExchange {
 	bytes dr_pubkey = 2;    // DR pub key too
 }
 
-message CertExchange {
-	bytes cert_pubkey = 1;  // Public key of certificate
+message PeerPubKeyExchange {
+	bytes pubkey = 1;       // Public key of certificate
+}
+
+message PubKeyRequest {
+}
+
+message PubKeyReply {
+	string owner = 1;
+	bytes pubkey = 2;       // Public key reply
 }
 
 message EncryptedPacket {

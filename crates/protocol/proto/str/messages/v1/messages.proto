@@ -11,20 +11,11 @@ message Message {
 }
 
 message MessageAttachment {
-	oneof attachment {
+	oneof attachment_type {
 		ImageAttachment image = 2;
 		AudioAttachment audio = 3;
 		VideoAttachment video = 4;
 	}
-}
-
-enum AttachmentType {
-	// we need an unspecified type since protobuf encourages backwards compatibility
-	// it's a bit dumb since this is v1, but it's good practice.
-	ATTACHMENT_TYPE_UNSPECIFIED = 0;
-	ATTACHMENT_TYPE_IMAGE = 1;
-    ATTACHMENT_TYPE_AUDIO = 2;
-    ATTACHMENT_TYPE_VIDEO = 3;
 }
 
 message ImageAttachment {

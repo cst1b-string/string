@@ -23,7 +23,7 @@ pub fn start_peer_sender_worker(
     state: Arc<RwLock<PeerState>>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
     mut app_outbound_rx: mpsc::Receiver<ProtocolPacket>,
-    crypto: Arc<RwLock<Crypto>>,
+    _crypto: Arc<RwLock<Crypto>>,
     packet_number: Arc<Mutex<u32>>,
     pending_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
 ) {
@@ -79,11 +79,13 @@ pub fn start_peer_sender_worker(
                             SocketPacketType::Data,
                             *packet_number,
                             chunk_idx as u32,
-                            vec![],
+                            chunk,
                         )
                         .expect("failed to create packet")
                     })
             {
+                trace!("sending packet chunk: {:?}", net_packet);
+
                 match net_outbound_tx.send(net_packet.clone()).await {
                     Ok(_) => {
                         // add the packet to hashmap of packets that we don't have a ACK to

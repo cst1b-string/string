@@ -6,8 +6,8 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use flate2::read::GzDecoder;
-use string_protocol::{try_decode_packet, ProtocolPacket};
+// use flate2::read::GzDecoder;
+// use string_protocol::{try_decode_packet, ProtocolPacket};
 
 use super::error::SocketPacketDecodeError;
 
@@ -19,7 +19,7 @@ pub const SOCKET_PACKET_MAGIC_NUMBER: u32 = 0x010203;
 pub const MIN_SOCKET_PACKET_SIZE: usize = 3 + 1 + 4 + 4 + 4;
 
 /// The maximum size of a UDP datagram.
-pub const UDP_MAX_DATAGRAM_SIZE: usize = 65_507;
+pub const UDP_MAX_DATAGRAM_SIZE: usize = 40_000;
 
 /// A UDP packet sent over the network. These packets have the following format:
 ///
@@ -56,6 +56,7 @@ impl Eq for SocketPacket {}
 
 // TODO: Justify that packet_number and chunk_number will be unique.
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for SocketPacket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         //  enforces lexicographic ordering, with packet number taking precedence
@@ -203,21 +204,5 @@ impl SocketPacket {
             chunk_number,
             data,
         )?)
-    }
-
-    /// Decompress the data.
-    pub fn decompress(&self) -> std::io::Result<Vec<u8>> {
-        let mut data = Vec::new();
-        let mut gz_decoder = GzDecoder::new(self.data.as_slice());
-        gz_decoder.read_to_end(&mut data)?;
-        Ok(data)
-    }
-}
-
-impl TryFrom<SocketPacket> for ProtocolPacket {
-    type Error = SocketPacketDecodeError;
-
-    fn try_from(value: SocketPacket) -> Result<Self, Self::Error> {
-        Ok(try_decode_packet(value.decompress()?)?)
     }
 }

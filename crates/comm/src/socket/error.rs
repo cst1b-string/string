@@ -1,9 +1,12 @@
 //! Defines error types for the [crate::socket] module.
 
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 use crate::peer::PeerError;
 use string_protocol::PacketDecodeError;
+
+use super::Gossip;
 
 /// An enumeration of possible errors that can occur when working with [Socket].
 #[derive(Error, Debug)]
@@ -35,6 +38,9 @@ pub enum SocketError {
     /// Tried to send gossip, but 0 peers connected
     #[error("No peer for gossip")]
     NoPeer,
+    /// Failed to send gossip packet
+    #[error("Failed to send gossip packet")]
+    GossipSendError(#[from] Box<mpsc::error::SendError<Gossip>>),
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
