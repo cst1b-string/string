@@ -1,18 +1,25 @@
 "use client";
 
-import { ChatButton } from "@/components/chatButton";
+import { useRspc } from "@/integration";
+import Link from "next/link";
 
-function getChatNames(): string[] {
-	return ["David", "Group Chat!"];
-}
 
 export default function ChatSidebar() {
-	const chatNames = getChatNames();
+
+	const rspc = useRspc();
+	const { data } = rspc.useQuery(['channel.list']);
+	
 	return (
 		<div>
-			<ChatButton chatName="New Chat +" />
-			{chatNames.map((chatName, index) => (
-				<ChatButton key={index} chatName={chatName} />
+			<Link href="./newChat">
+				<button className="bg-transparent hover:bg-[#4e627a] text-white w-full py-5 rounded">
+					"New Chat"
+				</button>
+			</Link>
+			{data && data.map((channel) => (
+				<button className="bg-transparent hover:bg-[#4e627a] text-white w-full py-5 rounded">
+					{channel.title}
+				</button>
 			))}
 		</div>
 	);
