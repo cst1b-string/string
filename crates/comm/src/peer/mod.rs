@@ -10,6 +10,8 @@ use crate::{
     crypto::{Crypto, DoubleRatchet, DoubleRatchetError, SigningError},
     socket::{Gossip, GossipAction, SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
+use chrono::{DateTime, Utc};
+use rsntp::AsyncSntpClient;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -17,8 +19,9 @@ use std::{
     sync::Arc,
 };
 use string_protocol::{
-    crypto, gossip, try_decode_packet, try_encode_internal_packet, try_encode_packet, MessageType,
-    PacketDecodeError, PacketEncodeError, ProtocolPacket, ProtocolPacketType,
+    available_peers, crypto, gossip, try_decode_packet, try_encode_internal_packet,
+    try_encode_packet, MessageType, PacketDecodeError, PacketEncodeError, ProtocolPacket,
+    ProtocolPacketType,
 };
 use thiserror::Error;
 use tokio::sync::{
@@ -36,6 +39,32 @@ pub const CHANNEL_SIZE: usize = 32;
 /// The maximum size of an [ProtocolPacket] chunk before it needs to be split into multiple
 /// [SocketPacket]s.
 const MAX_PROTOCOL_PACKET_CHUNK_SIZE: usize = UDP_MAX_DATAGRAM_SIZE - MIN_SOCKET_PACKET_SIZE;
+
+/// An enumeration of possible errors that can occur when working with peers.
+#[derive(Error, Debug)]
+pub enum PeerError {
+    // Failed to send packet between threads.
+    #[error("Failed to send packet to network thread")]
+    NetworkSendFail(#[from] SendError<SocketPacket>),
+    // Failed to send packet between threads.
+    #[error("Failed to send packet to application")]
+    ApplicationSendFail(#[from] SendError<ProtocolPacket>),
+    // Failed to decode decrypted packet
+    #[error("Failed to decode decrypted packet")]
+    DecodeFail(#[from] PacketDecodeError),
+    // Failed to encode packet for encryption
+    #[error("Failed to encode packet for encryption")]
+    EncodeFail(#[from] PacketEncodeError),
+    // Failure in double ratchet
+    #[error("Failure in double ratchet")]
+    DRFail(#[from] DoubleRatchetError),
+    // Generic error with signature
+    #[error("Failure in signature verification")]
+    SigFail(#[from] SigningError),
+    /// The packet we received does not conform to some format
+    #[error("Bad packet")]
+    BadPacket,
+}
 
 /// The state of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,38 +103,15 @@ pub struct Peer {
     pub peername: Option<String>,
     ///
     pub fingerprint: Vec<u8>,
+    /// Contains the timestamp for the last received AvailablePeers packet &
+    /// the vector of usernames of peers
+    pub available_peers: (DateTime<Utc>, HashSet<String>),
 }
 
 impl fmt::Debug for Peer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<Peer {0}>", self.remote_addr)
     }
-}
-
-/// An enumeration of possible errors that can occur when working with peers.
-#[derive(Error, Debug)]
-pub enum PeerError {
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to network thread")]
-    NetworkSendFail(#[from] SendError<SocketPacket>),
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to application")]
-    ApplicationSendFail(#[from] SendError<ProtocolPacket>),
-    // Failed to decode decrypted packet
-    #[error("Failed to decode decrypted packet")]
-    DecodeFail(#[from] PacketDecodeError),
-    // Failed to encode packet for encryption
-    #[error("Failed to encode packet for encryption")]
-    EncodeFail(#[from] PacketEncodeError),
-    // Failure in double ratchet
-    #[error("Failure in double ratchet")]
-    DRFail(#[from] DoubleRatchetError),
-    // Generic error with signature
-    #[error("Failure in signature verification")]
-    SigFail(#[from] SigningError),
-    /// The packet we received does not conform to some format
-    #[error("Bad packet")]
-    BadPacket,
 }
 
 impl Peer {
@@ -176,6 +182,7 @@ impl Peer {
                 username,
                 peername: None,
                 fingerprint,
+                available_peers: (Self::get_utc_time(), vec![]),
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -188,6 +195,24 @@ impl Peer {
             .send(packet)
             .await
             .map_err(PeerError::ApplicationSendFail)?;
+        Ok(())
+    }
+
+    /// 
+    pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
+        let curr_time = Self::get_utc_time().await;
+
+        let available_peers =
+            ProtocolPacketType::PktAvailablepeers(available_peers::v1::AvailablePeers {
+                peers: self.available_peers.1.clone().into_iter().collect(),
+				time_sent: curr_time,
+            });
+
+        let packet_tosend = ProtocolPacket {
+            packet_type: Some(available_peers),
+        };
+
+        self.send_packet(packet_tosend).await?;
         Ok(())
     }
 
@@ -217,6 +242,7 @@ impl Peer {
         let tosend = ProtocolPacket {
             packet_type: Some(gossip),
         };
+        // TODO: why is there a clone here? does the function need one too?
         self.send_packet(tosend.clone()).await?;
         Ok(())
     }
@@ -414,5 +440,12 @@ impl Peer {
         // If we get here, fingerprint verified peer's pubkey
         self.peername = Some(peername);
         Ok(())
+    }
+
+    async fn get_utc_time() -> DateTime<Utc> {
+        let client = AsyncSntpClient::new();
+        let result = client.synchronize("pool.ntp.org").await.unwrap();
+
+        result.datetime().into_chrono_datetime().unwrap()
     }
 }

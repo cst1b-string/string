@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package str.availablepeers.v1;
+import "google/protobuf/timestamp.proto";
+
+message AvailablePeers {
+	repeated string peers = 1;
+	google.protobuf.Timestamp time_sent = 2;
+}
