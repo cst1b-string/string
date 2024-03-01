@@ -1,8 +1,8 @@
 //! Defines the RSPC router for the desktop application.
 
+mod account;
 mod channel;
 mod context;
-mod crypto;
 mod event;
 mod message;
 mod settings;
@@ -10,9 +10,9 @@ mod user;
 
 use std::{path::Path, sync::Arc};
 
+use account::attach_crypto_queries;
 use channel::attach_channel_queries;
 pub use context::Context;
-use crypto::attach_crypto_queries;
 use event::attach_event_queries;
 use message::attach_message_queries;
 use rspc::{Config, Router};
