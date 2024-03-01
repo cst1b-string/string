@@ -8,15 +8,13 @@ use std::{
     sync::Arc,
 };
 
-use string_protocol::{
-    try_decode_packet, ProtocolPacket, ProtocolPacketType,
-};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use string_protocol::{try_decode_packet, ProtocolPacket, ProtocolPacketType};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, trace};
 
 use crate::{
     maybe_break,
-    socket::{SocketPacket, SocketPacketType, Gossip, GossipAction},
+    socket::{Gossip, GossipAction, SocketPacket, SocketPacketType},
     try_break, try_continue, Peer,
 };
 
@@ -24,6 +22,7 @@ use super::PeerState;
 
 /// Starts the background tasks that handle receiving packets from the network and forwarding their
 /// decoded contents to the application.
+#[allow(clippy::too_many_arguments)]
 pub fn start_peer_receiver_worker(
     state: Arc<RwLock<PeerState>>,
     net_outbound_tx: mpsc::Sender<SocketPacket>,
@@ -31,7 +30,6 @@ pub fn start_peer_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     remote_addr: SocketAddr,
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    _packet_number: Arc<Mutex<u32>>,
     packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
     gossip_tx: mpsc::Sender<Gossip>,
 ) {
@@ -185,7 +183,7 @@ pub fn start_peer_receiver_worker(
                         match packet.packet_type {
                             Some(ProtocolPacketType::PktGossip(ref gossip)) => {
                                 // check if we are missing a signed packet
-                                if let None = gossip.packet {
+                                if gossip.packet.is_none() {
                                     continue;
                                 }
 
@@ -200,33 +198,32 @@ pub fn start_peer_receiver_worker(
                                         }
                                     };
 
-                                    // Verify signature on packet
-                                    // let signed_packet =
-                                    //     try_continue!(try_verify_packet_sig(&signed_packet));
-
                                     // Dispatch gossip to respective code if its for us...
-                                    try_continue!(peer.dispatch_gossip(
-                                        signed_packet.clone(),
-                                        app_inbound_tx.clone(),
-                                        remote_addr.clone(),
-                                        gossip_tx.clone()
+                                    try_continue!(
+                                        peer.dispatch_gossip(
+                                            signed_packet.clone(),
+                                            app_inbound_tx.clone(),
+                                            remote_addr,
+                                            gossip_tx.clone()
+                                        )
+                                        .await
                                     )
-                                    .await)
                                 };
                                 // ..., otherwise, forward it on to our peers
                                 if forward {
                                     debug!("going to forward packet");
-                                    let _ =
-                                    gossip_tx.send(Gossip {
-                                        action: GossipAction::Forward,
-                                        addr: Some(remote_addr),
-                                        packet: Some(packet),
-                                        message: None,
-                                        dest: None,
-                                        dest_sockaddr: None
-                                    }).await;
+                                    let _ = gossip_tx
+                                        .send(Gossip {
+                                            action: GossipAction::Forward,
+                                            addr: Some(remote_addr),
+                                            packet: Some(packet),
+                                            message: None,
+                                            dest: None,
+                                            dest_sockaddr: None,
+                                        })
+                                        .await;
                                 }
-                            },
+                            }
                             Some(ProtocolPacketType::PktPeerpubexchange(ref peerpubexchange)) => {
                                 {
                                     let mut peers_write = peers.write().await;
@@ -237,11 +234,9 @@ pub fn start_peer_receiver_worker(
                                         }
                                     };
 
-                                    peer.add_peer_pubkey(&peerpubexchange.pubkey)
-                                    .await
-                                    .unwrap()
+                                    peer.add_peer_pubkey(&peerpubexchange.pubkey).await.unwrap()
                                 };
-                            },
+                            }
                             Some(_) => {}
                             None => {}
                         }
