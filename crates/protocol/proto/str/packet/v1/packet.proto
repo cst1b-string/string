@@ -6,10 +6,15 @@ import "str/gossip/v1/gossip.proto";
 import "str/messages/v1/messages.proto";
 import "str/crypto/v1/crypto.proto";
 
+message UpHosts {
+	repeated string hosts = 1;
+}
+
 message Packet {
 	oneof packet_type {
 		str.gossip.v1.Gossip pkt_gossip = 1;
 		str.messages.v1.Message pkt_message = 2;
 		str.crypto.v1.PeerPubKeyExchange pkt_peerpubexchange = 3;
+		UpHosts pkt_uphosts = 4;
 	}
 }

@@ -7,20 +7,18 @@ mod inbound;
 mod outbound;
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, PGPPubkey, SigError},
-    socket::{SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE, Gossip, GossipAction},
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, SigningError},
+    socket::{Gossip, GossipAction, SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::SocketAddr,
     sync::Arc,
-    io::Cursor
 };
 use string_protocol::{
-    crypto, gossip, try_decode_packet, try_encode_packet, try_encode_internal_packet,
-    MessageType, PacketDecodeError,
-    PacketEncodeError, ProtocolPacket, ProtocolPacketType,
+    crypto, gossip, try_decode_packet, try_encode_internal_packet, try_encode_packet, MessageType,
+    PacketDecodeError, PacketEncodeError, ProtocolPacket, ProtocolPacketType,
 };
 use thiserror::Error;
 use tokio::sync::{
@@ -28,25 +26,9 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-use tracing::{error, span, warn, debug, Level};
+use tracing::{debug, error, span, warn, Level};
 
 use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
-
-use pgp::{
-    composed::{
-        KeyType,
-        KeyDetails,
-        SecretKey,
-        SecretSubkey,
-        key::SecretKeyParamsBuilder,
-        SignedSecretKey,
-        SignedPublicKey
-    },
-    packet::{KeyFlags, UserAttribute, UserId},
-    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
-    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
-    Deserializable,
-};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -120,7 +102,7 @@ pub enum PeerError {
     DRFail(#[from] DoubleRatchetError),
     // Generic error with signature
     #[error("Failure in signature verification")]
-    SigFail(#[from] SigError),
+    SigFail(#[from] SigningError),
     /// The packet we received does not conform to some format
     #[error("Bad packet")]
     BadPacket,
@@ -167,7 +149,6 @@ impl Peer {
                 net_inbound_rx,
                 remote_addr,
                 peers.clone(),
-                packet_number.clone(),
                 pending_acks.clone(),
                 gossip_tx.clone(),
             )
@@ -224,12 +205,12 @@ impl Peer {
             message_type: Some(message),
         };
         let signature = {
-            let mut crypto = self.crypto.read().await;
+            let crypto = self.crypto.read().await;
             crypto.sign_data(&try_encode_internal_packet(&internal)?)?
         };
         let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
-                signature: signature,
+                signature,
                 signed_data: Some(internal),
             }),
         });
@@ -291,11 +272,11 @@ impl Peer {
 
         if dest == self.username {
             {
-                let mut crypto_obj = self.crypto.write().await;
+                let crypto_obj = self.crypto.read().await;
                 crypto_obj.verify_data(
                     &source,
                     &signature,
-                    &try_encode_internal_packet(&cloned_signed_data)?
+                    &try_encode_internal_packet(&cloned_signed_data)?,
                 )?;
             }
             match signed_data.message_type {
@@ -340,8 +321,8 @@ impl Peer {
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
                 }
-                Some(MessageType::PubkeyRequest(_)) => unreachable!(),
-                Some(MessageType::PubkeyReply(reply)) => {
+                Some(MessageType::PubKeyRequest(_)) => unreachable!(),
+                Some(MessageType::PubKeyReply(reply)) => {
                     // TODO: forward reply to those asking in reply_to
                     let tosend = {
                         let mut crypto_obj = self.crypto.write().await;
@@ -349,19 +330,21 @@ impl Peer {
                     };
                     if tosend.is_some() {
                         for asking in tosend.unwrap() {
-                            gossip_tx.send(Gossip {
-                                action: GossipAction::SendDirect,
-                                addr: None,
-                                packet: None,
-                                message: Some(MessageType::PubkeyReply(reply.clone())),
-                                dest: None,
-                                dest_sockaddr: Some(asking)
-                            }).await;
+                            let _ = gossip_tx
+                                .send(Gossip {
+                                    action: GossipAction::SendDirect,
+                                    addr: None,
+                                    packet: None,
+                                    message: Some(MessageType::PubKeyReply(reply.clone())),
+                                    dest: None,
+                                    dest_sockaddr: Some(asking),
+                                })
+                                .await;
                         }
                     };
                     {
                         let mut crypto_obj = self.crypto.write().await;
-                        crypto_obj.add_pubkey_raw(&reply.pubkey);
+                        let _ = crypto_obj.add_pubkey_raw(&reply.pubkey);
                     }
                 }
                 None => {}
@@ -369,35 +352,42 @@ impl Peer {
         } else {
             forward = true;
             match signed_data.message_type {
-                Some(MessageType::KeyExchange(_))
-                | Some(MessageType::EncryptedPacket(_)) => {}
-                Some(MessageType::PubkeyRequest(..)) => {
+                Some(MessageType::KeyExchange(_)) | Some(MessageType::EncryptedPacket(_)) => {}
+                Some(MessageType::PubKeyRequest(..)) => {
                     forward = false;
                     let mut crypto_obj = self.crypto.write().await;
                     let pubkey = crypto_obj.lookup_pubkey(dest.clone());
                     if pubkey.is_some() {
-                        let armored = pubkey.unwrap().to_armored_bytes(None).map_err(SigError::PGPFail)?;
+                        let armored = pubkey
+                            .unwrap()
+                            .to_armored_bytes(None)
+                            .map_err(SigningError::PgpError)?;
                         drop(crypto_obj);
                         if self.peername.is_some() {
-                            self.send_gossip_single(MessageType::PubkeyReply(
-                            crypto::v1::PubkeyReply {
-                                owner: dest.clone(),
-                                pubkey: armored
-                            }), self.peername.clone().unwrap()).await?;
+                            self.send_gossip_single(
+                                MessageType::PubKeyReply(crypto::v1::PubKeyReply {
+                                    owner: dest.clone(),
+                                    pubkey: armored,
+                                }),
+                                self.peername.clone().unwrap(),
+                            )
+                            .await?;
                         }
-                    }
-                    else {
-                        let tosend = crypto_obj.insert_pubkey_reply_to(dest.clone(), Some(remote_addr.clone()));
+                    } else {
+                        let tosend =
+                            crypto_obj.insert_pubkey_reply_to(dest.clone(), Some(remote_addr));
                         drop(crypto_obj);
                         // len == 1 means only our remote_addr
                         if tosend.is_some() && tosend.unwrap().len() == 1 {
-                            self.send_gossip_single(MessageType::PubkeyRequest(
-                                crypto::v1::PubkeyRequest {}
-                            ), dest).await?;
+                            self.send_gossip_single(
+                                MessageType::PubKeyRequest(crypto::v1::PubKeyRequest {}),
+                                dest,
+                            )
+                            .await?;
                         }
                     }
                 }
-                Some(MessageType::PubkeyReply(_)) => unreachable!(),
+                Some(MessageType::PubKeyReply(_)) => unreachable!(),
                 None => {}
             }
         }
@@ -408,19 +398,18 @@ impl Peer {
         let armored = self.crypto.read().await.get_self_pubkey()?;
         self.send_packet(ProtocolPacket {
             packet_type: Some(ProtocolPacketType::PktPeerpubexchange(
-                crypto::v1::PeerPubKeyExchange {
-                    pubkey: armored
-                }
+                crypto::v1::PeerPubKeyExchange { pubkey: armored },
             )),
-        }).await?;
+        })
+        .await?;
         Ok(())
     }
 
     async fn add_peer_pubkey(&mut self, pubkey_bytes: &Vec<u8>) -> Result<(), PeerError> {
         let peername = self.crypto.write().await.try_add_peer_pubkey(
-            self.remote_addr.clone(),
+            self.remote_addr,
             pubkey_bytes,
-            &self.fingerprint
+            &self.fingerprint,
         )?;
         // If we get here, fingerprint verified peer's pubkey
         self.peername = Some(peername);
