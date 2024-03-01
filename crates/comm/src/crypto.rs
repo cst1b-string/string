@@ -37,15 +37,15 @@ pub enum DoubleRatchetError {
 }
 
 #[derive(Error, Debug)]
-pub enum SigError {
+pub enum SigningError {
     #[error("Fingerprint mismatch")]
     FingerprintMismatch,
     #[error("Generic PGP Error")]
-    PGPFail(#[from] pgp::errors::Error),
+    PgpError(#[from] pgp::errors::Error),
     #[error("Missing public key for node")]
     MissingPubKey,
     #[error("MPI parsing went wrong")]
-    MPIFail,
+    MpiFail,
 }
 
 /// Key exchange process happens as follows:
@@ -97,7 +97,7 @@ pub enum DoubleRatchet {
 }
 
 #[derive(Debug)]
-pub enum PGPPubkey {
+pub enum PgpPubKey {
     PeerUninit { fingerprint: Vec<u8> },
     NodeUninit { reply_to: Vec<SocketAddr> },
     Initialized { pubkey: SignedPublicKey },
@@ -105,7 +105,7 @@ pub enum PGPPubkey {
 
 pub struct Crypto {
     pub ratchets: HashMap<String, DoubleRatchet>,
-    pub pubkeys: HashMap<String, PGPPubkey>,
+    pub pubkeys: HashMap<String, PgpPubKey>,
     /// Our private key
     pub secret_key: SignedSecretKey,
 }
@@ -119,7 +119,7 @@ impl Crypto {
         }
     }
 
-    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, SigError> {
+    pub fn get_self_pubkey(&self) -> Result<Vec<u8>, SigningError> {
         let armored = self
             .secret_key
             .public_key()
@@ -132,11 +132,11 @@ impl Crypto {
         format!("{0}", pubkey.details.users[0].id.id())
     }
 
-    pub fn add_pubkey(&mut self, pubkey: SignedPublicKey) -> Result<String, SigError> {
+    pub fn add_pubkey(&mut self, pubkey: SignedPublicKey) -> Result<String, SigningError> {
         let nodename = Crypto::get_pubkey_username(pubkey.clone());
         self.pubkeys.insert(
             nodename.clone(),
-            PGPPubkey::Initialized {
+            PgpPubKey::Initialized {
                 pubkey: pubkey.clone(),
             },
         );
@@ -144,7 +144,7 @@ impl Crypto {
         Ok(nodename)
     }
 
-    pub fn add_pubkey_raw(&mut self, pubkey_bytes: &Vec<u8>) -> Result<String, SigError> {
+    pub fn add_pubkey_raw(&mut self, pubkey_bytes: &Vec<u8>) -> Result<String, SigningError> {
         let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
         self.add_pubkey(pubkey)
     }
@@ -154,20 +154,20 @@ impl Crypto {
         _peer: SocketAddr,
         pubkey_bytes: &Vec<u8>,
         fingerprint: &Vec<u8>,
-    ) -> Result<String, SigError> {
+    ) -> Result<String, SigningError> {
         let (pubkey, _headers) = SignedPublicKey::from_armor_single(Cursor::new(pubkey_bytes))?;
         if pubkey.fingerprint() == *fingerprint {
             Ok(self.add_pubkey(pubkey)?)
         } else {
-            Err(SigError::FingerprintMismatch)
+            Err(SigningError::FingerprintMismatch)
         }
     }
 
     pub fn lookup_pubkey(&mut self, dest: String) -> Option<SignedPublicKey> {
         let result = match self.pubkeys.entry(dest) {
             Entry::Occupied(entry) => match entry.get() {
-                PGPPubkey::Initialized { pubkey } => Some(pubkey.clone()),
-                PGPPubkey::NodeUninit { .. } | PGPPubkey::PeerUninit { .. } => None,
+                PgpPubKey::Initialized { pubkey } => Some(pubkey.clone()),
+                PgpPubKey::NodeUninit { .. } | PgpPubKey::PeerUninit { .. } => None,
             },
             Entry::Vacant(_) => None,
         };
@@ -181,20 +181,20 @@ impl Crypto {
     ) -> Option<Vec<SocketAddr>> {
         let result = match self.pubkeys.entry(dest) {
             Entry::Occupied(mut entry) => match entry.get_mut() {
-                PGPPubkey::NodeUninit { reply_to } => {
+                PgpPubKey::NodeUninit { reply_to } => {
                     if let Some(who) = whos_asking {
                         reply_to.push(who);
                     }
                     Some(reply_to.clone())
                 }
-                PGPPubkey::Initialized { .. } | PGPPubkey::PeerUninit { .. } => None,
+                PgpPubKey::Initialized { .. } | PgpPubKey::PeerUninit { .. } => None,
             },
             Entry::Vacant(entry) => {
                 let mut reply_to = Vec::new();
                 if let Some(who) = whos_asking {
                     reply_to.push(who);
                 }
-                entry.insert(PGPPubkey::NodeUninit {
+                entry.insert(PgpPubKey::NodeUninit {
                     reply_to: reply_to.clone(),
                 });
                 Some(reply_to)
@@ -203,7 +203,7 @@ impl Crypto {
         result
     }
 
-    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigError> {
+    pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigningError> {
         // So apparently the official RFC calls for more stuff but this works
         let digest = {
             let mut hasher = Sha256::new();
@@ -230,11 +230,15 @@ impl Crypto {
         source: &String,
         signature: &[u8],
         bytes: &[u8],
-    ) -> Result<(), SigError> {
-        let signed_pub_key = match self.pubkeys.get(source).ok_or(SigError::MissingPubKey)? {
-            PGPPubkey::Initialized { pubkey } => pubkey,
-            PGPPubkey::PeerUninit { .. } | PGPPubkey::NodeUninit { .. } => {
-                return Err(SigError::MissingPubKey);
+    ) -> Result<(), SigningError> {
+        let signed_pub_key = match self
+            .pubkeys
+            .get(source)
+            .ok_or(SigningError::MissingPubKey)?
+        {
+            PgpPubKey::Initialized { pubkey } => pubkey,
+            PgpPubKey::PeerUninit { .. } | PgpPubKey::NodeUninit { .. } => {
+                return Err(SigningError::MissingPubKey);
             }
         };
 
@@ -246,19 +250,13 @@ impl Crypto {
         let digest = digest.as_slice();
 
         let (_unused, mpi_sig) =
-            map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigError::MPIFail)?;
+            map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigningError::MpiFail)?;
 
         signed_pub_key.verify_signature(HashAlgorithm::SHA2_256, digest, &mpi_sig)?;
         debug!("signature verified");
         Ok(())
     }
 }
-
-// impl Default for Crypto {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
 
 impl fmt::Debug for DoubleRatchet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

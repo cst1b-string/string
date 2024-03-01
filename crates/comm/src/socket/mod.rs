@@ -110,7 +110,7 @@ impl Socket {
 
         if secret_key.details.users.len() != 1 {
             // Why do we have a weird number of users
-            return Err(SocketError::CertError);
+            panic!("Invalid number of users in secret key - programming error")
         }
 
         let username = Crypto::get_pubkey_username(secret_key.into());
@@ -194,19 +194,7 @@ impl Socket {
         message: MessageType,
         destination: String,
     ) -> Result<(), SocketError> {
-        // let gossip_targets = self.select_gossip_peers(None).await?;
-        // for target in gossip_targets {
-        //     let mut peers = self.peers.write().await;
-        //     let target_peer = peers.get_mut(&target);
-        //     if (target_peer
-        //         .expect("No such peer")
-        //         .send_gossip_single(message.clone(), destination.clone())
-        //         .await)
-        //         .is_ok()
-        //     {}
-        // }
-        let _ = self
-            .gossip_tx
+        self.gossip_tx
             .send(Gossip {
                 action: GossipAction::Send,
                 addr: None,
@@ -215,8 +203,8 @@ impl Socket {
                 dest: Some(destination),
                 dest_sockaddr: None,
             })
-            .await;
-        Ok(())
+            .await
+            .map_err(|err| SocketError::GossipSendError(Box::new(err)))
     }
 
     /// Sends encrypted packet to random group of peers
@@ -227,19 +215,7 @@ impl Socket {
         packet: ProtocolPacket,
         destination: String,
     ) -> Result<(), SocketError> {
-        // let gossip_targets = self.select_gossip_peers(None).await?;
-        // for target in gossip_targets {
-        //     let mut peers_write = peers.write().await;
-        //     let target_peer = peers_write.get_mut(&target);
-        //     if (target_peer
-        //         .expect("No such peer")
-        //         .send_gossip_single_encrypted(packet.clone(), destination.clone())
-        //         .await)
-        //         .is_ok()
-        //     {}
-        // }
-        let _ = self
-            .gossip_tx
+        self.gossip_tx
             .send(Gossip {
                 action: GossipAction::SendEncrypted,
                 addr: None,
@@ -248,8 +224,8 @@ impl Socket {
                 dest: Some(destination),
                 dest_sockaddr: None,
             })
-            .await;
-        Ok(())
+            .await
+            .map_err(|err| SocketError::GossipSendError(Box::new(err)))
     }
 
     pub async fn get_node_cert(&mut self, destination: String) -> Result<(), SocketError> {
@@ -258,7 +234,7 @@ impl Socket {
             crypto_obj.insert_pubkey_reply_to(destination.clone(), None);
         }
         self.send_gossip(
-            MessageType::PubkeyRequest(crypto::v1::PubkeyRequest {}),
+            MessageType::PubKeyRequest(crypto::v1::PubKeyRequest {}),
             destination,
         )
         .await?;

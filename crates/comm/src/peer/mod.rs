@@ -7,7 +7,7 @@ mod inbound;
 mod outbound;
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, SigError},
+    crypto::{Crypto, DoubleRatchet, DoubleRatchetError, SigningError},
     socket::{Gossip, GossipAction, SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
 use std::{
@@ -102,7 +102,7 @@ pub enum PeerError {
     DRFail(#[from] DoubleRatchetError),
     // Generic error with signature
     #[error("Failure in signature verification")]
-    SigFail(#[from] SigError),
+    SigFail(#[from] SigningError),
     /// The packet we received does not conform to some format
     #[error("Bad packet")]
     BadPacket,
@@ -149,7 +149,6 @@ impl Peer {
                 net_inbound_rx,
                 remote_addr,
                 peers.clone(),
-                packet_number.clone(),
                 pending_acks.clone(),
                 gossip_tx.clone(),
             )
@@ -322,8 +321,8 @@ impl Peer {
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
                 }
-                Some(MessageType::PubkeyRequest(_)) => unreachable!(),
-                Some(MessageType::PubkeyReply(reply)) => {
+                Some(MessageType::PubKeyRequest(_)) => unreachable!(),
+                Some(MessageType::PubKeyReply(reply)) => {
                     // TODO: forward reply to those asking in reply_to
                     let tosend = {
                         let mut crypto_obj = self.crypto.write().await;
@@ -336,7 +335,7 @@ impl Peer {
                                     action: GossipAction::SendDirect,
                                     addr: None,
                                     packet: None,
-                                    message: Some(MessageType::PubkeyReply(reply.clone())),
+                                    message: Some(MessageType::PubKeyReply(reply.clone())),
                                     dest: None,
                                     dest_sockaddr: Some(asking),
                                 })
@@ -354,7 +353,7 @@ impl Peer {
             forward = true;
             match signed_data.message_type {
                 Some(MessageType::KeyExchange(_)) | Some(MessageType::EncryptedPacket(_)) => {}
-                Some(MessageType::PubkeyRequest(..)) => {
+                Some(MessageType::PubKeyRequest(..)) => {
                     forward = false;
                     let mut crypto_obj = self.crypto.write().await;
                     let pubkey = crypto_obj.lookup_pubkey(dest.clone());
@@ -362,11 +361,11 @@ impl Peer {
                         let armored = pubkey
                             .unwrap()
                             .to_armored_bytes(None)
-                            .map_err(SigError::PGPFail)?;
+                            .map_err(SigningError::PgpError)?;
                         drop(crypto_obj);
                         if self.peername.is_some() {
                             self.send_gossip_single(
-                                MessageType::PubkeyReply(crypto::v1::PubkeyReply {
+                                MessageType::PubKeyReply(crypto::v1::PubKeyReply {
                                     owner: dest.clone(),
                                     pubkey: armored,
                                 }),
@@ -381,14 +380,14 @@ impl Peer {
                         // len == 1 means only our remote_addr
                         if tosend.is_some() && tosend.unwrap().len() == 1 {
                             self.send_gossip_single(
-                                MessageType::PubkeyRequest(crypto::v1::PubkeyRequest {}),
+                                MessageType::PubKeyRequest(crypto::v1::PubKeyRequest {}),
                                 dest,
                             )
                             .await?;
                         }
                     }
                 }
-                Some(MessageType::PubkeyReply(_)) => unreachable!(),
+                Some(MessageType::PubKeyReply(_)) => unreachable!(),
                 None => {}
             }
         }

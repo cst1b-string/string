@@ -205,20 +205,4 @@ impl SocketPacket {
             data,
         )?)
     }
-
-    // Decompress the data.
-    // pub fn decompress(&self) -> std::io::Result<Vec<u8>> {
-    //     let mut data = Vec::new();
-    //     let mut gz_decoder = GzDecoder::new(self.data.as_slice());
-    //     gz_decoder.read_to_end(&mut data)?;
-    //     Ok(data)
-    // }
 }
-
-// impl TryFrom<SocketPacket> for ProtocolPacket {
-//     type Error = SocketPacketDecodeError;
-
-//     fn try_from(value: SocketPacket) -> Result<Self, Self::Error> {
-//         Ok(try_decode_packet(value.decompress()?)?)
-//     }
-// }

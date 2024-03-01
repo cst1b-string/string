@@ -9,7 +9,7 @@ use std::{
 };
 
 use string_protocol::{try_decode_packet, ProtocolPacket, ProtocolPacketType};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -30,7 +30,6 @@ pub fn start_peer_receiver_worker(
     mut net_inbound_rx: mpsc::Receiver<SocketPacket>,
     remote_addr: SocketAddr,
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-    _packet_number: Arc<Mutex<u32>>,
     packet_acks: Arc<RwLock<HashSet<(u32, u32)>>>,
     gossip_tx: mpsc::Sender<Gossip>,
 ) {
@@ -198,10 +197,6 @@ pub fn start_peer_receiver_worker(
                                             continue;
                                         }
                                     };
-
-                                    // Verify signature on packet
-                                    // let signed_packet =
-                                    //     try_continue!(try_verify_packet_sig(&signed_packet));
 
                                     // Dispatch gossip to respective code if its for us...
                                     try_continue!(
