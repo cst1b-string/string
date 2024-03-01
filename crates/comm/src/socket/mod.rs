@@ -7,6 +7,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     net::SocketAddr,
     sync::Arc,
+    time::Duration
 };
 
 use rand::{rngs::OsRng, seq::IteratorRandom};
@@ -14,6 +15,7 @@ use string_protocol::{MessageType, ProtocolPacket};
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
+    time::sleep
 };
 use tracing::{debug, error, span, trace};
 
@@ -115,6 +117,11 @@ impl Socket {
         // start the gossip worker
         span!(tracing::Level::INFO, "socket::gossip")
             .in_scope(|| start_gossip_worker(gossip_rx, peers.clone()));
+
+        // start the perodic worker
+        span!(tracing::Level::INFO, "socket::periodic")
+            .in_scope(|| start_periodic_worker(peers.clone()));
+
 
         if secret_key.details.users.len() != 1 {
             // Why do we have a weird number of users
@@ -425,4 +432,15 @@ fn start_gossip_worker(
 
         }
 });
+}
+
+/// Starts a background worker than can do certain chores at regular intervals
+fn start_periodic_worker(
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(5000)).await;
+        }
+    });
 }
