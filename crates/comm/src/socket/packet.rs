@@ -30,7 +30,7 @@ pub const UDP_MAX_DATAGRAM_SIZE: usize = 40_000;
 /// - 4 bytes: Length of the data
 ///
 /// Then arbitrary-length data, as defined by the protocol.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct SocketPacket {
     /// The type of packet.
     pub packet_type: SocketPacketType,

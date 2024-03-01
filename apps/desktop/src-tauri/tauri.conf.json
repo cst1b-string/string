@@ -12,7 +12,8 @@
 	},
 	"tauri": {
 		"allowlist": {
-			"all": false
+			"all": false,
+			"window": { "all": true }
 		},
 		"bundle": {
 			"active": true,
@@ -29,7 +30,7 @@
 				"icons/icon.icns",
 				"icons/icon.ico"
 			],
-			"identifier": "com.tauri.dev",
+			"identifier": "org.github.cst1bstring",
 			"longDescription": "",
 			"macOS": {
 				"entitlements": null,

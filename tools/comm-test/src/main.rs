@@ -270,6 +270,7 @@ async fn main() {
                                 username: username.to_string(),
                                 content: message.to_string(),
                                 attachments: vec![],
+                                time_sent: None,
                             };
                             let packet = ProtocolPacket {
                                 packet_type: Some(ProtocolPacketType::PktMessage(message)),
@@ -290,6 +291,7 @@ async fn main() {
                                         username: username.to_string(),
                                         content: "".to_string(),
                                         attachments: vec![img],
+                                        time_sent: None,
                                     };
                                     let packet = ProtocolPacket {
                                         packet_type: Some(ProtocolPacketType::PktMessage(message)),
