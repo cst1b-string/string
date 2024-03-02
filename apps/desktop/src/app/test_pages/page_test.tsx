@@ -3,9 +3,9 @@
 export default function Home() {
 	return (
 		<main className="flex min-h-screen flex-col items-center justify-between p-24">
-			<div className='font-mono text-sm'>
-				<h2 className={`text-3xl`}> 
-				<code className="font-bold"> String </code>
+			<div className="font-mono text-sm">
+				<h2 className={`text-3xl`}>
+					<code className="font-bold"> String </code>
 				</h2>
 			</div>
 			<div className="font-mono text-sm">
@@ -15,10 +15,12 @@ export default function Home() {
 					&nbsp;a decentralised social network.
 				</p>
 
-			<div className="font-mono text-sm">
-				<p className="justify-center border-b border-gray-300 bg-gradient-to-b from zinc-200"> Test pn</p>
-			</div>
-				
+				<div className="font-mono text-sm">
+					<p className="justify-center border-b border-gray-300 bg-gradient-to-b from zinc-200">
+						{" "}
+						Test pn
+					</p>
+				</div>
 			</div>
 		</main>
 	);

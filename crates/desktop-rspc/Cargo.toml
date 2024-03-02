@@ -1,0 +1,29 @@
+[package]
+name = "desktop-rspc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+
+async-stream = "0.3"
+futures = "0.3"
+pgp = "0.11"
+rspc = { version = "0.1", features = ["tauri"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+smallvec = "1"
+thiserror = "1.0"
+tracing = "0.1"
+
+string-comm = { path = "../comm" }
+string-protocol = { path = "../protocol" }
+cache-prisma = { path = "../cache-prisma" }
+
+[lib]
+name = "desktop_rspc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rspc-exporter"
+path = "bin/rspc-exporter.rs"

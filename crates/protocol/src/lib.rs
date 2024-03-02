@@ -72,6 +72,8 @@ pub type ProtocolPacketType = packet::v1::packet::PacketType;
 /// A type alias for [crypto::v1::signed_packet_internal::MessageType], useful for disambiguating message types in Gossip packets
 pub type MessageType = crypto::v1::signed_packet_internal::MessageType;
 
+pub type AttachmentType = messages::v1::message_attachment::AttachmentType;
+
 /// An error that can occur when decoding a packet.
 #[derive(Debug, Error)]
 pub enum PacketDecodeError {
@@ -91,7 +93,7 @@ pub enum PacketEncodeError {
 }
 
 /// Attempt to decode a packet from the given buffer.
-pub fn try_decode_packet<Data>(buf: Data) -> Result<packet::v1::Packet, PacketDecodeError>
+pub fn try_decode_packet<Data>(buf: Data) -> Result<ProtocolPacket, PacketDecodeError>
 where
     Data: AsRef<[u8]>,
 {
@@ -104,7 +106,7 @@ where
 }
 
 /// Attempt to encode a packet into a buffer.
-pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, PacketEncodeError> {
+pub fn try_encode_packet(packet: &ProtocolPacket) -> Result<Vec<u8>, PacketEncodeError> {
     // encode packet
     let mut buf = Vec::new();
     packet.encode(&mut buf)?;
@@ -114,27 +116,11 @@ pub fn try_encode_packet(packet: &packet::v1::Packet) -> Result<Vec<u8>, PacketE
     Ok(encoder.finish()?)
 }
 
-#[derive(Error, Debug)]
-pub enum SignatureError {
-    #[error("Invalid signature")]
-    SignatureFail,
-    #[error("Missing signed data")]
-    MissingData,
-    /// A packet failed to encode.
-    #[error("Failed to encode packet")]
-    EncodeFail(#[from] EncodeError),
-}
-
-pub fn try_verify_packet_sig(
-    signed: &crypto::v1::SignedPacket,
-) -> Result<&crypto::v1::SignedPacket, SignatureError> {
+/// Attempt to encode a SignedPacketInternal for signing purposes
+pub fn try_encode_internal_packet(
+    packet: &crypto::v1::SignedPacketInternal,
+) -> Result<Vec<u8>, PacketEncodeError> {
     let mut buf = Vec::new();
-    match signed.signed_data.clone() {
-        Some(data) => {
-            data.encode(&mut buf)?;
-            // TODO: add signature verification code
-            Ok(signed)
-        }
-        None => Err(SignatureError::MissingData),
-    }
+    packet.encode(&mut buf)?;
+    Ok(buf)
 }

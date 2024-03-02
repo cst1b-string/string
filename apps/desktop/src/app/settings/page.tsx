@@ -1,78 +1,57 @@
-// Profile display name, bio?, dark/light mode, clear chats, etc.
+"use client";
 
-'use client'
+import { useContext, useMemo, useState } from "react";
 
-{/* <button onClick={() => false}>
-<h1> Change Username: {Username} </h1>
-</button> */}
-
-import { useContext, useState } from 'react';
-import { themeContext } from '../page';
-
-const [usernameState, setUsernameState] = useState('');
-
-export function set_username(username: string) {} //placeholder
-
-export function handleUsernameSubmit() {
-	set_username(usernameState);
-}
-
-export function handleUsernameChange(e: React.FormEvent<HTMLInputElement>) {
-
-	setUsernameState(e.currentTarget.value);
-
-}
+import { ThemeContext } from "../layout";
 
 export default function Home() {
+	const { lightMode, setLightMode } = useContext(ThemeContext);
 
-	const lightModeComposite = useContext(themeContext);
-	const lightMode = lightModeComposite.lightMode;
-	var lightModeText;
-	var Username = "<Username from Tauri>";
+	const lightModeText = useMemo(() => (lightMode ? "Dark Mode" : "Light Mode"), [lightMode]);
 
-	setUsernameState(Username);
+	const [username, setUsername] = useState("<Username from Tauri>");
+	const [bio, setBio] = useState("<Bio from Tauri>");
 
-	var Bio = "<Bio from Tauri>";
-	if (lightMode) {
-		lightModeText = "Dark Mode"
-	}
-
-	else {
-		lightModeText = "Light Mode"
-	}
 	return (
-		<div className="flex justify-center">
-			<div className="py-5 w-1/3 space-y-1">
-				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
-
-					<button onClick={() => lightModeComposite.setLightMode(true)}>
-						<h1> {lightModeText} </h1>
-					</button>
-
+		<div className="flex flex-row justify-center py-5">
+			<div className="flex flex-col space-y-4 w-[600px]">
+				<div className="flex  justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
+					<button onClick={() => setLightMode(!lightMode)}>{lightModeText}</button>
 				</div>
 
-				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+				<form
+					className="flex justify-center flex-col space-y-4"
+					onSubmit={(e) => {
+						e.preventDefault();
+						console.log("do some calls to the backend here!", username, bio);
+					}}
+				>
+					<div className="flex items-center justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+						<label className="mr-4"> Username</label>
+						<input
+							className="flex-grow bg-[#335577] p-4 rounded-md"
+							value={username}
+							onChange={(e) => setUsername(e.currentTarget.value)}
+						/>
+					</div>
 
-					<h1 className="px-1"> Username: </h1>
-					<input className="bg-[#113355] px-1" defaultValue={Username} onChange={handleUsernameChange}/>
-					
-					<button className="px-1 bg-black rounded-md" onClick={handleUsernameSubmit}>
-						<h1> Submit </h1>
-					</button>
+					<div className="flex flex-col justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+						<label className="py-4"> Biography</label>
+						<textarea
+							className="p-4 resize-none w-full rounded-md bg-[#335577]"
+							rows={5}
+							value={bio}
+							onChange={(e) => setBio(e.target.value)}
+						/>
+					</div>
 
-				</div>
-
-				<div className="flex justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
-
-					<h1 className="px-1"> User Bio: </h1>
-					<textarea className="bg-[#113355] px-1 resize-none" rows={5} defaultValue={Bio}/>
-
-					<button className="px-1 py-5 bg-black rounded-md" onClick={() => false}>
-						<h1> Submit </h1>
-					</button>
-
-				</div>
-
+					<input
+						id="submit"
+						type="submit"
+						className="flex justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]"
+						value="Submit"
+					/>
+				</form>
 			</div>
 		</div>
 	);

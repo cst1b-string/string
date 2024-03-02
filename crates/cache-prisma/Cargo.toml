@@ -1,5 +1,5 @@
 [package]
-name = "prisma"
+name = "cache-prisma"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,4 @@ serde = { workspace = true }
 git = "https://github.com/Brendonovich/prisma-client-rust"
 tag = "0.6.11"
 default-features = false
-features = ["postgresql"]
+features = ["sqlite", "rspc"]

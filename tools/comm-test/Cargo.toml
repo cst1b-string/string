@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace=  true }
+tokio = { workspace = true }
 
 string-comm = { path = "../../crates/comm" }
 string-protocol = { path = "../../crates/protocol" }
@@ -12,3 +12,8 @@ string-protocol = { path = "../../crates/protocol" }
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+pgp = "0.11.0"
+smallvec = "1.13.1"
+hex = "0.4.3"
+image = "0.24.9"
+artem = "2.0.6"

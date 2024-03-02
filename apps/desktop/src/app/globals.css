@@ -21,3 +21,8 @@ body {
 		text-wrap: balance;
 	}
 }
+
+.input {
+	background-color: #3f3f3f;
+	color: #ebe5e5;
+}

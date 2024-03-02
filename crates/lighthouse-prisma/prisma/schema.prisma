@@ -1,11 +1,11 @@
 datasource db {
     provider = "postgresql"
-    url      = env("DATABASE_URL")
+    url      = env("LIGHTHOUSE_DATABASE_URL")
 }
 
 generator client {
     provider = "cargo prisma"
-    output   = "./src/prisma.rs"
+    output   = "../src/prisma.rs"
 }
 
 model Channel {
