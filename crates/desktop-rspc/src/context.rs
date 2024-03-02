@@ -32,13 +32,13 @@ impl Context {
 
         // create sqlite path
         let sqlite_path = format!(
-            "file://{}",
+            "file:{}",
             data_dir
                 .as_ref()
                 .join("cache.sqlite")
                 .to_str()
                 .expect("invalid path")
-        );
+        ).replace("\\", "/");
         info!("- SQLite path: {:?}", sqlite_path);
 
         // create settings path

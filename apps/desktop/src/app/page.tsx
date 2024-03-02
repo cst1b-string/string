@@ -2,10 +2,23 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
-import { useState } from "react";
+import { redirect } from "next/navigation";
+import { createContext, useState } from "react";
+
+export const themeContext = createContext({
+	lightMode: false,
+	setLightMode: (value: boolean) => {},
+});
+
+var hasAccount = false;
 
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
+	if (!hasAccount) {
+		redirect("/signUp");
+	}
+	const [lightMode, setLightMode] = useState(false);
+
 	return (
 		<div className="grid grid-cols-3 divide-x divide-gray-400 h-[calc(100vh-80px)]">
 			<div className="">
