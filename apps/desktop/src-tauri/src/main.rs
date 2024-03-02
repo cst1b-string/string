@@ -50,7 +50,7 @@ async fn main() {
     // create context
     info!("Creating application context...");
     let ctx = desktop_rspc::Ctx::new(
-        Context::from(socket, data_dir)
+        Context::new(socket, data_dir)
             .await
             .expect("failed to create context"),
     );

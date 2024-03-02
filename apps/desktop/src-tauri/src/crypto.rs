@@ -33,7 +33,7 @@ pub fn generate_key(username: String, password: String) -> SignedSecretKey {
 }
 
 fn load_key(location: &String) -> Option<SignedSecretKey> {
-    let Ok(mut file) = File::open(&location) else {
+    let Ok(mut file) = File::open(location) else {
         return None;
     };
     let Ok((key, _headers)) = SignedSecretKey::from_armor_single(&mut file) else {

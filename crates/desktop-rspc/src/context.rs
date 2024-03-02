@@ -4,7 +4,10 @@ use string_comm::Socket;
 use thiserror::Error;
 use tracing::info;
 
-use crate::settings::{self, SettingsContext};
+use crate::{
+    account::AccountContext,
+    settings::{self, SettingsContext},
+};
 
 /// The context type for the router.
 pub struct Context {
@@ -14,6 +17,8 @@ pub struct Context {
     pub cache: cache_prisma::PrismaClient,
     /// The settings for the application.
     pub settings_ctx: settings::SettingsContext,
+    /// The account context.
+    pub account_ctx: AccountContext,
 }
 
 /// An enum of errors that can occur when working with the context.
@@ -27,7 +32,7 @@ pub enum ContextError {
 
 impl Context {
     /// Create a new context with the given socket.
-    pub async fn from<P: AsRef<Path>>(socket: Socket, data_dir: P) -> Result<Self, ContextError> {
+    pub async fn new<P: AsRef<Path>>(socket: Socket, data_dir: P) -> Result<Self, ContextError> {
         info!("- Data directory: {:?}", data_dir.as_ref());
 
         // create sqlite path
@@ -48,7 +53,8 @@ impl Context {
         Ok(Self {
             socket,
             cache: cache_prisma::new_client_with_url(&sqlite_path).await?,
-            settings_ctx: SettingsContext::from_path(settings_path).await?,
+            account_ctx: AccountContext::from_data_dir(&data_dir),
+            settings_ctx: SettingsContext::from_data_dir(&data_dir).await?,
         })
     }
 }
