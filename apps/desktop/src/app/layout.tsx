@@ -1,5 +1,6 @@
 "use client";
 
+import { IntegrationProvider } from "@/integration";
 import { Inter } from "next/font/google";
 import { createContext, useState } from "react";
 
@@ -28,13 +29,15 @@ export default function RootLayout({
 	const [lightMode, setLightMode] = useState(false);
 
 	return (
-		<ThemeContext.Provider value={{ lightMode, setLightMode }}>
-			<html lang="en">
-				<body className={inter.className}>
-					<Navbar />
-					{children}
-				</body>
-			</html>
-		</ThemeContext.Provider>
+		<IntegrationProvider>
+			<ThemeContext.Provider value={{ lightMode, setLightMode }}>
+				<html lang="en">
+					<body className={inter.className}>
+						<Navbar />
+						{children}
+					</body>
+				</html>
+			</ThemeContext.Provider>
+		</IntegrationProvider>
 	);
 }

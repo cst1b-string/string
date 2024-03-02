@@ -7,6 +7,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     net::SocketAddr,
     sync::Arc,
+    time::Duration,
 };
 
 use rand::{rngs::OsRng, seq::IteratorRandom};
@@ -18,7 +19,7 @@ use tokio::{
 use tracing::{debug, error, span, trace};
 
 use crate::{
-    crypto::{Crypto, DoubleRatchet, PGPPubkey},
+    crypto::{Crypto, DoubleRatchet},
     maybe_continue,
     peer::{Peer, PeerState, CHANNEL_SIZE},
     try_break, try_continue,
@@ -32,20 +33,7 @@ pub use self::packet::{
 
 use string_protocol::crypto;
 
-use pgp::{
-    composed::{
-        KeyType,
-        KeyDetails,
-        SecretKey,
-        SecretSubkey,
-        key::SecretKeyParamsBuilder,
-        SignedSecretKey
-    },
-    packet::{KeyFlags, UserAttribute, UserId},
-    types::{KeyTrait, PublicKeyTrait, SecretKeyTrait, CompressionAlgorithm},
-    crypto::{sym::SymmetricKeyAlgorithm, hash::HashAlgorithm},
-    Deserializable
-};
+use pgp::composed::SignedSecretKey;
 
 /// Number of peers to send gossip to
 const GOSSIP_COUNT: usize = 3;
@@ -58,7 +46,7 @@ pub enum GossipAction {
     /// We received a gossip packet, please forward it
     Forward,
     /// Actually not a gossip, just send directly
-    SendDirect
+    SendDirect,
 }
 
 pub struct Gossip {
@@ -73,7 +61,7 @@ pub struct Gossip {
     /// Destination to send to; not needed when forwarding
     pub dest: Option<String>,
     ///
-    pub dest_sockaddr: Option<SocketAddr>
+    pub dest_sockaddr: Option<SocketAddr>,
 }
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
@@ -116,9 +104,13 @@ impl Socket {
         span!(tracing::Level::INFO, "socket::gossip")
             .in_scope(|| start_gossip_worker(gossip_rx, peers.clone()));
 
+        // start the perodic worker
+        span!(tracing::Level::INFO, "socket::periodic")
+            .in_scope(|| start_periodic_worker(peers.clone()));
+
         if secret_key.details.users.len() != 1 {
             // Why do we have a weird number of users
-            return Err(SocketError::CertError);
+            panic!("Invalid number of users in secret key - programming error")
         }
 
         let username = Crypto::get_pubkey_username(secret_key.into());
@@ -202,26 +194,17 @@ impl Socket {
         message: MessageType,
         destination: String,
     ) -> Result<(), SocketError> {
-        // let gossip_targets = self.select_gossip_peers(None).await?;
-        // for target in gossip_targets {
-        //     let mut peers = self.peers.write().await;
-        //     let target_peer = peers.get_mut(&target);
-        //     if (target_peer
-        //         .expect("No such peer")
-        //         .send_gossip_single(message.clone(), destination.clone())
-        //         .await)
-        //         .is_ok()
-        //     {}
-        // }
-        let _ = self.gossip_tx.send(Gossip {
-            action: GossipAction::Send,
-            addr: None,
-            packet: None,
-            message: Some(message),
-            dest: Some(destination),
-            dest_sockaddr: None
-        }).await;
-        Ok(())
+        self.gossip_tx
+            .send(Gossip {
+                action: GossipAction::Send,
+                addr: None,
+                packet: None,
+                message: Some(message),
+                dest: Some(destination),
+                dest_sockaddr: None,
+            })
+            .await
+            .map_err(|err| SocketError::GossipSendError(Box::new(err)))
     }
 
     /// Sends encrypted packet to random group of peers
@@ -232,39 +215,29 @@ impl Socket {
         packet: ProtocolPacket,
         destination: String,
     ) -> Result<(), SocketError> {
-        // let gossip_targets = self.select_gossip_peers(None).await?;
-        // for target in gossip_targets {
-        //     let mut peers_write = peers.write().await;
-        //     let target_peer = peers_write.get_mut(&target);
-        //     if (target_peer
-        //         .expect("No such peer")
-        //         .send_gossip_single_encrypted(packet.clone(), destination.clone())
-        //         .await)
-        //         .is_ok()
-        //     {}
-        // }
-        let _ = self.gossip_tx.send(Gossip {
-            action: GossipAction::SendEncrypted,
-            addr: None,
-            packet: Some(packet),
-            message: None,
-            dest: Some(destination),
-            dest_sockaddr: None
-        }).await;
-        Ok(())
+        self.gossip_tx
+            .send(Gossip {
+                action: GossipAction::SendEncrypted,
+                addr: None,
+                packet: Some(packet),
+                message: None,
+                dest: Some(destination),
+                dest_sockaddr: None,
+            })
+            .await
+            .map_err(|err| SocketError::GossipSendError(Box::new(err)))
     }
 
-    pub async fn get_node_cert(
-        &mut self,
-        destination: String,
-    ) -> Result<(), SocketError> {
+    pub async fn get_node_cert(&mut self, destination: String) -> Result<(), SocketError> {
         {
             let mut crypto_obj = self.crypto.write().await;
             crypto_obj.insert_pubkey_reply_to(destination.clone(), None);
         }
-        self.send_gossip(MessageType::PubkeyRequest(
-            crypto::v1::PubkeyRequest {}
-        ), destination).await?;
+        self.send_gossip(
+            MessageType::PubKeyRequest(crypto::v1::PubKeyRequest {}),
+            destination,
+        )
+        .await?;
         Ok(())
     }
 
@@ -295,7 +268,7 @@ fn start_outbound_worker(socket: Arc<UdpSocket>, peers: Arc<RwLock<HashMap<Socke
         loop {
             trace!("start outbound worker loop");
             // wait for socket to be readable
-            let _ = try_break!(socket.readable().await, "Error reading from socket");
+            try_break!(socket.readable().await, "Error reading from socket");
 
             // receive packet
             let (size, addr) = try_continue!(
@@ -350,38 +323,42 @@ fn spawn_inbound_peer_task(
 
 fn start_gossip_worker(
     mut gossip_rx: mpsc::Receiver<Gossip>,
-    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
 ) {
     tokio::spawn(async move {
         loop {
             trace!("start gossip task loop");
 
             // receive gossip
-            let Gossip {action, addr: skip, packet, message, dest, dest_sockaddr} = match gossip_rx.recv().await {
+            let Gossip {
+                action,
+                addr: skip,
+                packet,
+                message,
+                dest,
+                dest_sockaddr,
+            } = match gossip_rx.recv().await {
                 Some(gossip) => gossip,
                 None => break,
             };
 
-            match action {
-                GossipAction::SendDirect => {
-                    let mut peers_obj = peers.write().await;
-                    let peer = peers_obj.get_mut(&dest_sockaddr.unwrap());
-                    if peer.is_none() { continue; }
-                    let peer_ = peer.unwrap();
-                    let peername = peer_.peername.clone();
-                    peer_.send_gossip_single(
-                        message.unwrap().clone(),
-                        peername.unwrap(),
-                    ).await;
+            if let GossipAction::SendDirect = action {
+                let mut peers_obj = peers.write().await;
+                let peer = peers_obj.get_mut(&dest_sockaddr.unwrap());
+                if peer.is_none() {
                     continue;
                 }
-                _ => {}
+                let peer_ = peer.unwrap();
+                let peername = peer_.peername.clone();
+                let _ = peer_
+                    .send_gossip_single(message.unwrap().clone(), peername.unwrap())
+                    .await;
+                continue;
             }
 
             // Selects at most 3 peers randomly from list of peers - should
             // probably employ round robin here.
-            let targets: Vec<_> = 
-                peers
+            let targets: Vec<_> = peers
                 .read()
                 .await
                 .keys()
@@ -398,31 +375,40 @@ fn start_gossip_worker(
             for target in targets {
                 let mut peers_write = peers.write().await;
                 let target_peer = peers_write.get_mut(&target);
-                    let target_peer_ = target_peer.expect("No such peer");
-                    let res = match action {
-                        GossipAction::Send => {
-                            trace!("sending gossip {:?}", message);
-                            target_peer_.send_gossip_single(
-                                message.clone().unwrap(),
-                                dest.clone().unwrap(),
-                            ).await
-                        },
-                        GossipAction::SendEncrypted => {
-                            trace!("sending encrypted gossip {:?}", packet);
-                            target_peer_.send_gossip_single_encrypted(
+                let target_peer_ = target_peer.expect("No such peer");
+                let res = match action {
+                    GossipAction::Send => {
+                        trace!("sending gossip {:?}", message);
+                        target_peer_
+                            .send_gossip_single(message.clone().unwrap(), dest.clone().unwrap())
+                            .await
+                    }
+                    GossipAction::SendEncrypted => {
+                        trace!("sending encrypted gossip {:?}", packet);
+                        target_peer_
+                            .send_gossip_single_encrypted(
                                 packet.clone().unwrap(),
                                 dest.clone().unwrap(),
-                            ).await
-                        },
-                        GossipAction::Forward => {
-                            trace!("forwarding gossip {:?}", packet);
-                            target_peer_.send_packet(packet.clone().unwrap()).await
-                        },
-                        GossipAction::SendDirect => unreachable!()
-                    };
-                    if res.is_ok() {}
+                            )
+                            .await
+                    }
+                    GossipAction::Forward => {
+                        trace!("forwarding gossip {:?}", packet);
+                        target_peer_.send_packet(packet.clone().unwrap()).await
+                    }
+                    GossipAction::SendDirect => unreachable!(),
+                };
+                if res.is_ok() {}
             }
-
         }
-});
+    });
+}
+
+/// Starts a background worker than can do certain chores at regular intervals
+fn start_periodic_worker(_peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(5000)).await;
+        }
+    });
 }

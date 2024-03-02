@@ -13,8 +13,8 @@ message SignedPacketInternal {
 	string destination = 2;
 	oneof message_type {
 		DRKeyExchange key_exchange = 3;
-		PubkeyRequest pubkey_request = 4;
-		PubkeyReply pubkey_reply = 5;
+		PubKeyRequest pub_key_request = 4;
+		PubKeyReply pub_key_reply = 5;
 		EncryptedPacket encrypted_packet = 6;
 	}
 }
@@ -34,10 +34,10 @@ message PeerPubKeyExchange {
 	bytes pubkey = 1;       // Public key of certificate
 }
 
-message PubkeyRequest {
+message PubKeyRequest {
 }
 
-message PubkeyReply {
+message PubKeyReply {
 	string owner = 1;
 	bytes pubkey = 2;       // Public key reply
 }

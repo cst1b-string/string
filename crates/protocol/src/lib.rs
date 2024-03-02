@@ -117,8 +117,9 @@ pub fn try_encode_packet(packet: &ProtocolPacket) -> Result<Vec<u8>, PacketEncod
 }
 
 /// Attempt to encode a SignedPacketInternal for signing purposes
-pub fn try_encode_internal_packet(packet: &crypto::v1::SignedPacketInternal) -> Result<Vec<u8>, PacketEncodeError>
-{
+pub fn try_encode_internal_packet(
+    packet: &crypto::v1::SignedPacketInternal,
+) -> Result<Vec<u8>, PacketEncodeError> {
     let mut buf = Vec::new();
     packet.encode(&mut buf)?;
     Ok(buf)

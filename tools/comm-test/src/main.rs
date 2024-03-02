@@ -61,14 +61,13 @@ fn generate_key(username: String, password: String) -> SignedSecretKey {
         .generate()
         .expect("Failed to generate a plain key.");
     let passwd_fn = || password;
-
     secret_key
         .sign(passwd_fn)
         .expect("Must be able to sign its own metadata")
 }
 
 fn load_key(location: &String) -> Option<SignedSecretKey> {
-    let Ok(mut file) = File::open(&location) else {
+    let Ok(mut file) = File::open(location) else {
         return None;
     };
     let Ok((key, _headers)) = SignedSecretKey::from_armor_single(&mut file) else {
@@ -114,16 +113,13 @@ fn display_attachments(username: String, attachments: Vec<messages::v1::MessageA
         info!("<{0}>: ", username);
     }
     for iter in attachments {
-        if let Some(attachment) = iter.attachment_type {
-            match attachment {
-                AttachmentType::Image(messages::v1::ImageAttachment { format: _, data }) => {
-                    if let Ok(img) = image::load_from_memory(&data) {
-                        let config = &artem::config::ConfigBuilder::new().build();
-                        let ascii = artem::convert(img, config);
-                        println!("{}", ascii);
-                    }
-                }
-                _ => {}
+        if let Some(AttachmentType::Image(messages::v1::ImageAttachment { format: _, data })) =
+            iter.attachment_type
+        {
+            if let Ok(img) = image::load_from_memory(&data) {
+                let config = &artem::config::ConfigBuilder::new().build();
+                let ascii = artem::convert(img, config);
+                println!("{}", ascii);
             }
         }
     }

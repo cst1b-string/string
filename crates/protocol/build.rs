@@ -1,7 +1,4 @@
 fn main() -> std::io::Result<()> {
-    // rebuild rust definitions if base changed
-    println!("cargo:rerun-if-changed=./proto/**/*.proto");
-
     // find all protocol files
     let files = glob::glob("./proto/**/*.proto")
         .expect("failed to find protocol files")
