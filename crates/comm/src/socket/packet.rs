@@ -92,6 +92,10 @@ pub enum SocketPacketType {
     Heartbeat,
     /// Actual communication data
     Data,
+    /// Packet that is requesting available peers
+    RequestAvailablePeers,
+    /// Packet that contains the available peers
+    SendAvailablePeers,
     /// An invalid packet.
     Invalid,
 }
@@ -104,6 +108,8 @@ impl From<u8> for SocketPacketType {
             2 => SocketPacketType::SynAck,
             3 => SocketPacketType::Heartbeat,
             4 => SocketPacketType::Data,
+            5 => SocketPacketType::RequestAvailablePeers,
+            6 => SocketPacketType::SendAvailablePeers,
             _ => SocketPacketType::Invalid,
         }
     }

@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 use string_protocol::{
-    available_peers, crypto, gossip, try_decode_packet, try_encode_internal_packet,
+    crypto, gossip, send_available_peers, try_decode_packet, try_encode_internal_packet,
     try_encode_packet, MessageType, PacketDecodeError, PacketEncodeError, ProtocolPacket,
     ProtocolPacketType,
 };
@@ -198,18 +198,31 @@ impl Peer {
         Ok(())
     }
 
-    /// 
+    pub async fn request_available_peers(&mut self) -> Result<(), PeerError> {
+        let request_available_peers = ProtocolPacketType::PktRequestAvailablePeers(
+            request_available_peers::v1::RequestAvailablePeers {},
+        );
+
+        let packet_tosend = ProtocolPacket {
+            packet_type: Some(request_available_peers),
+        };
+        self.send_packet(packet_tosend).await?;
+		Ok(())
+    }
+
+    ///
     pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
         let curr_time = Self::get_utc_time().await;
 
-        let available_peers =
-            ProtocolPacketType::PktAvailablepeers(available_peers::v1::AvailablePeers {
+        let send_available_peers = ProtocolPacketType::PktSendAvailablepeers(
+            send_available_peers::v1::SendAvailablePeers {
                 peers: self.available_peers.1.clone().into_iter().collect(),
-				time_sent: curr_time,
-            });
+                time_sent: curr_time,
+            },
+        );
 
         let packet_tosend = ProtocolPacket {
-            packet_type: Some(available_peers),
+            packet_type: Some(send_available_peers),
         };
 
         self.send_packet(packet_tosend).await?;
@@ -242,7 +255,7 @@ impl Peer {
         let tosend = ProtocolPacket {
             packet_type: Some(gossip),
         };
-        // TODO: why is there a clone here? does the function need one too?
+        // TODO: why is there a clone here? does the function above need one too?
         self.send_packet(tosend.clone()).await?;
         Ok(())
     }

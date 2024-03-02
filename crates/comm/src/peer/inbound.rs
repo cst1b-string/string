@@ -92,6 +92,8 @@ pub fn start_peer_receiver_worker(
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
+                        | SocketPacketType::RequestAvailablePeers
+                        | SocketPacketType::SendAvailablePeers
                         | SocketPacketType::Invalid => {}
                     }
                 }
@@ -129,6 +131,8 @@ pub fn start_peer_receiver_worker(
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
+                        | SocketPacketType::RequestAvailablePeers
+                        | SocketPacketType::SendAvailablePeers
                         | SocketPacketType::Invalid => {}
                     }
                 }
@@ -141,6 +145,19 @@ pub fn start_peer_receiver_worker(
                         let mut packets = packet_acks.write().await;
                         packets.remove(&(packet.packet_number, packet.chunk_number));
                     }
+                    SocketPacketType::RequestAvailablePeers => {
+						try_break!(
+							net_outbound_tx
+								.send(SocketPacket::new(
+									// TODO: Use Data or SendAvailablePeers??
+									SocketPacketType::SendAvailablePeers,
+									
+								))
+						)
+					}
+                    SocketPacketType::SendAvailablePeers => {
+
+					}
                     SocketPacketType::Data => {
                         // send ack
                         try_break!(
@@ -237,8 +254,7 @@ pub fn start_peer_receiver_worker(
                                     peer.add_peer_pubkey(&peerpubexchange.pubkey).await.unwrap()
                                 };
                             }
-                            Some(_) => {}
-                            None => {}
+                            _ => {}
                         }
 
                         // clear queue
