@@ -1,5 +1,13 @@
+import { redirect } from "next/navigation";
+
+const hasAccount = false;
+
 export default function SignUp() {
 
+	if (hasAccount) {
+		redirect("/");
+	}
+	
 	return (
 		<div className="py-6 flex justify-center">
 		<div className="bg-white rounded px-12 py-10 flex flex-col space-y-4 w-96">

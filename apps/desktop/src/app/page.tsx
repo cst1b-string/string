@@ -2,7 +2,7 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
-import SignUp from "@/components/signUp";
+import { redirect } from "next/navigation";
 import { createContext, useState } from "react";
 
 export const themeContext = createContext({
@@ -14,9 +14,7 @@ var hasAccount = false;
 
 export default function Home() {
 	if (!hasAccount) {
-		return (
-			< SignUp />
-		)
+		redirect("/signUp");
 	}
 	const [lightMode, setLightMode] = useState(false);
 
