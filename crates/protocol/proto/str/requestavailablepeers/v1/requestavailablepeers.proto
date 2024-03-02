@@ -1,7 +1,0 @@
-syntax = "proto3";
-
-package str.requestavailablepeers.v1;
-import "google/protobuf/timestamp.proto";
-
-// doesn't contain anything inside of it, just 
-message RequestAvailablePeers {}

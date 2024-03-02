@@ -59,9 +59,9 @@ pub mod gossip {
     include_protocol!("gossip", v1);
 }
 
-/// Defines the available peers types
-pub mod available_peers {
-    include_protocol!("availablepeers", v1);
+/// Defines the SendAvailablePeers + RequestAvailablePeers
+pub mod peers {
+    include_protocol!("peers", v1);
 }
 
 pub mod prost {

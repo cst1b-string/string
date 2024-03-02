@@ -3,7 +3,7 @@
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::peer::PeerError;
+use crate::peer::error::PeerError;
 use string_protocol::PacketDecodeError;
 
 use super::Gossip;

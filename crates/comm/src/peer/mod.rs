@@ -3,6 +3,7 @@
 //! and the channels used for passing data between the network tasks.
 
 mod ack;
+pub mod error;
 mod inbound;
 mod outbound;
 
@@ -10,28 +11,29 @@ use crate::{
     crypto::{Crypto, DoubleRatchet, DoubleRatchetError, SigningError},
     socket::{Gossip, GossipAction, SocketPacket, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE},
 };
-use chrono::{DateTime, Utc};
-use rsntp::AsyncSntpClient;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::SocketAddr,
     sync::Arc,
 };
+
+use chrono::Datelike;
+use prost_types::Timestamp;
+use rsntp::AsyncSntpClient;
+
 use string_protocol::{
-    crypto, gossip, send_available_peers, try_decode_packet, try_encode_internal_packet,
-    try_encode_packet, MessageType, PacketDecodeError, PacketEncodeError, ProtocolPacket,
-    ProtocolPacketType,
-};
-use thiserror::Error;
-use tokio::sync::{
-    mpsc::{self, error::SendError},
-    Mutex, RwLock,
+    crypto, gossip, peers, try_decode_packet, try_encode_internal_packet, try_encode_packet,
+    MessageType, ProtocolPacket, ProtocolPacketType,
 };
 
-use tracing::{debug, error, span, warn, Level};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
-use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
+use tracing::{debug, span, warn, Level};
+
+use self::{
+    error::PeerError, inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker,
+};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -39,32 +41,6 @@ pub const CHANNEL_SIZE: usize = 32;
 /// The maximum size of an [ProtocolPacket] chunk before it needs to be split into multiple
 /// [SocketPacket]s.
 const MAX_PROTOCOL_PACKET_CHUNK_SIZE: usize = UDP_MAX_DATAGRAM_SIZE - MIN_SOCKET_PACKET_SIZE;
-
-/// An enumeration of possible errors that can occur when working with peers.
-#[derive(Error, Debug)]
-pub enum PeerError {
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to network thread")]
-    NetworkSendFail(#[from] SendError<SocketPacket>),
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to application")]
-    ApplicationSendFail(#[from] SendError<ProtocolPacket>),
-    // Failed to decode decrypted packet
-    #[error("Failed to decode decrypted packet")]
-    DecodeFail(#[from] PacketDecodeError),
-    // Failed to encode packet for encryption
-    #[error("Failed to encode packet for encryption")]
-    EncodeFail(#[from] PacketEncodeError),
-    // Failure in double ratchet
-    #[error("Failure in double ratchet")]
-    DRFail(#[from] DoubleRatchetError),
-    // Generic error with signature
-    #[error("Failure in signature verification")]
-    SigFail(#[from] SigningError),
-    /// The packet we received does not conform to some format
-    #[error("Bad packet")]
-    BadPacket,
-}
 
 /// The state of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +81,7 @@ pub struct Peer {
     pub fingerprint: Vec<u8>,
     /// Contains the timestamp for the last received AvailablePeers packet &
     /// the vector of usernames of peers
-    pub available_peers: (DateTime<Utc>, HashSet<String>),
+    pub available_peers: (Timestamp, HashSet<String>), //(DateTime<Utc>, HashSet<String>),
 }
 
 impl fmt::Debug for Peer {
@@ -117,7 +93,7 @@ impl fmt::Debug for Peer {
 impl Peer {
     /// Create a new connection to the given destination.
     #[tracing::instrument(name = "peer", skip(initiate))]
-    pub fn new(
+    pub async fn new(
         remote_addr: SocketAddr,
         crypto: Arc<RwLock<Crypto>>,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
@@ -125,11 +101,14 @@ impl Peer {
         gossip_tx: mpsc::Sender<Gossip>,
         fingerprint: Vec<u8>,
         initiate: bool,
-    ) -> (
-        Self,
-        mpsc::Receiver<ProtocolPacket>,
-        mpsc::Receiver<SocketPacket>,
-    ) {
+    ) -> Result<
+        (
+            Self,
+            mpsc::Receiver<ProtocolPacket>,
+            mpsc::Receiver<SocketPacket>,
+        ),
+        PeerError,
+    > {
         // channels for sending and receiving ProtocolPackets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -171,7 +150,7 @@ impl Peer {
             )
         });
 
-        (
+        Ok((
             Self {
                 remote_addr,
                 app_outbound_tx,
@@ -182,11 +161,11 @@ impl Peer {
                 username,
                 peername: None,
                 fingerprint,
-                available_peers: (Self::get_utc_time(), vec![]),
+                available_peers: (Self::get_utc_time().await?, HashSet::new()),
             },
             app_inbound_rx,
             net_outbound_rx,
-        )
+        ))
     }
 
     /// Send a packet to the peer.
@@ -199,27 +178,26 @@ impl Peer {
     }
 
     pub async fn request_available_peers(&mut self) -> Result<(), PeerError> {
-        let request_available_peers = ProtocolPacketType::PktRequestAvailablePeers(
-            request_available_peers::v1::RequestAvailablePeers {},
-        );
+        let request_available_peers =
+            ProtocolPacketType::PktRequestAvailablePeers(peers::v1::RequestAvailablePeers {});
 
         let packet_tosend = ProtocolPacket {
             packet_type: Some(request_available_peers),
         };
+
         self.send_packet(packet_tosend).await?;
-		Ok(())
+        Ok(())
     }
 
     ///
     pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
-        let curr_time = Self::get_utc_time().await;
+        let timestamp = Self::get_utc_time().await?;
 
-        let send_available_peers = ProtocolPacketType::PktSendAvailablepeers(
-            send_available_peers::v1::SendAvailablePeers {
+        let send_available_peers =
+            ProtocolPacketType::PktSendAvailablePeers(peers::v1::SendAvailablePeers {
                 peers: self.available_peers.1.clone().into_iter().collect(),
-                time_sent: curr_time,
-            },
-        );
+                time_sent: Some(timestamp),
+            });
 
         let packet_tosend = ProtocolPacket {
             packet_type: Some(send_available_peers),
@@ -455,10 +433,16 @@ impl Peer {
         Ok(())
     }
 
-    async fn get_utc_time() -> DateTime<Utc> {
+    async fn get_utc_time() -> Result<Timestamp, PeerError> {
         let client = AsyncSntpClient::new();
-        let result = client.synchronize("pool.ntp.org").await.unwrap();
+        let result = client.synchronize("pool.ntp.org").await?;
 
-        result.datetime().into_chrono_datetime().unwrap()
+        let curr_time = result.datetime().into_chrono_datetime()?;
+        // unwrap here is safe (month is <= 12 and day is <= 31)
+        Ok(Timestamp::date(
+            curr_time.year().into(),
+            curr_time.month().try_into().unwrap(),
+            curr_time.day().try_into().unwrap(),
+        )?)
     }
 }

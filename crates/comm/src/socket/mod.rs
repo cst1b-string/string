@@ -131,7 +131,7 @@ impl Socket {
         addr: SocketAddr,
         fingerprint: Vec<u8>,
         initiate: bool,
-    ) -> (mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>) {
+    ) -> Result<(mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>), SocketError> {
         let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(
             addr,
             self.crypto.clone(),
@@ -140,7 +140,7 @@ impl Socket {
             self.gossip_tx.clone(),
             fingerprint,
             initiate,
-        );
+        ).await?;
 
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
@@ -160,7 +160,7 @@ impl Socket {
             connections.insert(addr, peer);
         }
 
-        (app_outbound_tx, app_inbound_rx)
+        Ok((app_outbound_tx, app_inbound_rx))
     }
 
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
@@ -183,6 +183,30 @@ impl Socket {
         let mut peers = self.peers.write().await;
         let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
         peer.send_packet(packet).await?;
+
+        Ok(())
+    }
+
+    pub async fn request_available_peers(
+        &mut self,
+        destination: SocketAddr,
+    ) -> Result<(), SocketError> {
+        // lookup peer
+        let mut peers = self.peers.write().await;
+        let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
+        peer.request_available_peers().await?;
+
+        Ok(())
+    }
+
+    pub async fn send_available_peers(
+        &mut self,
+        destination: SocketAddr,
+    ) -> Result<(), SocketError> {
+        // lookup peer
+        let mut peers = self.peers.write().await;
+        let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
+        peer.send_available_peers().await?;
 
         Ok(())
     }
@@ -259,6 +283,7 @@ impl Socket {
             }
         }
     }
+
 }
 
 /// Start the outbound network worker.

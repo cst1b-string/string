@@ -146,17 +146,19 @@ pub fn start_peer_receiver_worker(
                         packets.remove(&(packet.packet_number, packet.chunk_number));
                     }
                     SocketPacketType::RequestAvailablePeers => {
-						try_break!(
-							net_outbound_tx
-								.send(SocketPacket::new(
-									// TODO: Use Data or SendAvailablePeers??
-									SocketPacketType::SendAvailablePeers,
-									
-								))
+						let mut peers_read = peers.write().await;
+						let peer = match peers_read.get_mut(&remote_addr) {
+							Some(p) => p,
+							None => {
+								continue;
+							}
+						};
+						try_continue!(
+							peer.send_available_peers().await
 						)
 					}
                     SocketPacketType::SendAvailablePeers => {
-
+						
 					}
                     SocketPacketType::Data => {
                         // send ack

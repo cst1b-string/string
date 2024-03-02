@@ -7,7 +7,7 @@ use std::{
     net::SocketAddr,
     time::Duration,
 };
-use string_comm::{peer::PeerState, Socket};
+use string_comm::{peer::PeerState, socket::SocketError, Socket};
 use string_protocol::{messages, AttachmentType, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::mpsc;
 use tracing::{error, info, level_filters::LevelFilter};
@@ -191,7 +191,7 @@ async fn main() {
     for (i, peer_addr) in peer_addrs.iter().enumerate() {
         let fingerprint = hex::decode(&fingerprints[i]).expect("Invalid fingerprint format");
         let (app_outbound_tx, app_inbound_rx) =
-            socket.add_peer(*peer_addr, fingerprint, initiate).await;
+            socket.add_peer(*peer_addr, fingerprint, initiate).await.unwrap();
         senders.push(app_outbound_tx);
         receivers.push(app_inbound_rx);
     }

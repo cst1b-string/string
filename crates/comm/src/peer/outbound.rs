@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use string_protocol::{try_encode_packet, ProtocolPacket};
+use string_protocol::{try_encode_packet, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace, warn};
 
@@ -66,36 +66,34 @@ pub fn start_peer_sender_worker(
             let mut packet_number = packet_number.lock().await;
             let mut pending_acks_write = pending_acks.write().await;
 
-            let packets =
-                if let Some(ProtocolPacket::PktRequestAvailablePeers(_)) = packet.packet_type {
-                    vec![SocketPacket::empty(
-                        SocketPacketType::RequestAvailablePeers,
-                        *packet_number,
-                        0,
-                    )]
-                    .into_iter()
-                } else {
-                    // encode packet
-                    trace!("encode packet: {:?}", packet);
-                    let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
+            // encode packet
+            trace!("encode packet: {:?}", packet);
+            let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
 
-                    buf.chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE).enumerate().map(
-                        |(chunk_idx, chunk)| {
-                            SocketPacket::new(
-                                SocketPacketType::Data,
-                                *packet_number,
-                                chunk_idx as u32,
-                                chunk,
-                            )
-                            .expect("failed to create data packet")
-                        },
-                    );
-                };
             // split packet into network packets and send
-            for net_packet in packets {
+            for net_packet in
+                buf.chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
+                    .enumerate()
+                    .map(|(chunk_idx, chunk)| match packet.packet_type {
+                        Some(ProtocolPacketType::PktRequestAvailablePeers(_)) => {
+                            SocketPacket::empty(
+                                SocketPacketType::RequestAvailablePeers,
+                                *packet_number,
+                                0,
+                            )
+                        }
+                        _ => SocketPacket::new(
+                            SocketPacketType::Data,
+                            *packet_number,
+                            chunk_idx as u32,
+                            chunk,
+                        )
+                        .expect("failed to create data packet"),
+                    })
+            {
                 trace!("sending packet chunk: {:?}", net_packet);
-				// TODO: match for packet_type and if RequestAvailablePeers
-				// wait for SendAvailablePeers and SEND back an Ack
+                // TODO: match for packet_type and if RequestAvailablePeers
+                // wait for SendAvailablePeers and SEND back an Ack
 
                 match net_outbound_tx.send(net_packet.clone()).await {
                     Ok(_) => {

@@ -1,7 +1,10 @@
 syntax = "proto3";
 
-package str.sendavailablepeers.v1;
+package str.peers.v1;
 import "google/protobuf/timestamp.proto";
+
+// doesn't contain anything inside of it, just used to ask peers for what peers they see
+message RequestAvailablePeers {}
 
 message SendAvailablePeers {
 	repeated string peers = 1;
