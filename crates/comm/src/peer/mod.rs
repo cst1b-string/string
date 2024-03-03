@@ -81,7 +81,7 @@ pub struct Peer {
     pub fingerprint: Vec<u8>,
     /// Contains the timestamp for the last received AvailablePeers packet &
     /// the vector of usernames of peers
-    pub available_peers: (Timestamp, HashSet<String>), //(DateTime<Utc>, HashSet<String>),
+    pub available_peers: (Timestamp, HashSet<String>), 
 }
 
 impl fmt::Debug for Peer {
