@@ -9,26 +9,27 @@ generator client {
 }
 
 model Pubkey {
-    id         Int       @id @default(autoincrement())
-    endpoint   Endpoint  @relation(fields: [endpointID], references: [id])
-    endpointID String    @db.Uuid
-    pubkey     String
+    id          Int       @id @default(autoincrement())
+    endpoint    Endpoint  @relation(fields: [endpointID], references: [id])
+    endpointID  String    @db.Uuid
+    pubkey      String
 }
 
 model Endpoint {
-    id         String    @id @default(uuid()) @db.Uuid
-    ip         String    @db.Inet
-    port       Int
-    lastUpdate DateTime
-    pubkeys    Pubkey[]
-    pending    PendingConnection[]
+    id          String    @id @default(uuid()) @db.Uuid
+    ip          String    @db.Inet
+    port        Int
+    lastUpdate  DateTime
+    pubkeys     Pubkey[]
+    pending     PendingConnection[]
 }
 
 model PendingConnection {
-    id         Int       @id @default(autoincrement())
-    endpoint   Endpoint  @relation(fields: [endpointID], references: [id])
-    endpointID String    @db.Uuid
-    ip         String    @db.Inet
-    port       Int
-    createdAt  DateTime  @default(now())
+    id          Int       @id @default(autoincrement())
+    endpoint    Endpoint  @relation(fields: [endpointID], references: [id])
+    endpointID  String    @db.Uuid
+    ip          String    @db.Inet
+    port        Int
+    fingerprint Bytes
+    createdAt   DateTime  @default(now())
 }

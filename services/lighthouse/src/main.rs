@@ -15,21 +15,17 @@ use axum::{
 };
 use axum_macros::debug_handler;
 use lighthouse_prisma::PrismaClient;
-use nom::combinator::map;
-use pgp::{
-    composed::{SignedPublicKey, SignedSecretKey},
-    crypto::hash::HashAlgorithm,
-    types::{mpi, PublicKeyTrait},
-    Deserializable,
-};
+use pgp::{composed::SignedPublicKey, Deserializable};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
 use tower_http::{add_extension::AddExtensionLayer, trace::TraceLayer};
 
+use string_comm::crypto::Crypto;
+
 /// Defines the available error types.
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 enum LighthouseError {
     #[error("unknown error")]
@@ -46,6 +42,8 @@ enum LighthouseError {
     SigError,
     #[error("no such ID")]
     InvalidID,
+    #[error("invalid fingerprint")]
+    InvalidFingerprint(#[from] hex::FromHexError),
 }
 
 #[derive(Serialize)]
@@ -125,19 +123,9 @@ fn verify_data(
 
     let data = format!("{}-{}", input, timestamp);
 
-    let digest = {
-        let mut hasher = Sha256::new();
-        hasher.update(data.as_bytes());
-        hasher.finalize()
-    };
-    let digest = digest.as_slice();
-
-    let (_unused, mpi_sig) =
-        map(mpi, |v| vec![v.to_owned()])(&signature).map_err(|_| LighthouseError::SigError)?;
-
-    pubkey
-        .verify_signature(HashAlgorithm::SHA2_256, digest, &mpi_sig)
+    Crypto::verify_data_static(&pubkey, &signature, data.as_bytes())
         .map_err(|_| LighthouseError::SigError)?;
+
     Ok(())
 }
 
@@ -153,6 +141,7 @@ struct RegisterEndpointPayload {
 struct LookupEndpointPayload {
     id: String,
     client: String,
+    fingerprint: String,
 }
 
 #[derive(Deserialize)]
@@ -174,7 +163,7 @@ struct LookupEndpointResponse {
 
 #[derive(Serialize)]
 struct ListConnResponse {
-    conns: Vec<String>,
+    conns: Vec<(String, String)>,
 }
 
 /// This endpoint handles the registration of a new endpoint.
@@ -187,7 +176,12 @@ async fn register_endpoint(
 
     let endpoint = SocketAddr::from_str(&payload.endpoint)?;
 
-    // TODO: call verify func
+    verify_data(
+        &payload.pubkey,
+        &payload.signature,
+        &payload.endpoint,
+        payload.timestamp,
+    )?;
 
     let endpoint_rec = db
         .endpoint()
@@ -236,9 +230,10 @@ async fn lookup_endpoint(
 
     db.pending_connection()
         .create(
-            lighthouse_prisma::endpoint::id::equals(payload.id),
+            lighthouse_prisma::endpoint::id::equals(payload.id.clone()),
             client.ip().to_string(),
             client.port().into(),
+            hex::decode(payload.fingerprint)?,
             vec![],
         )
         .exec()
@@ -258,16 +253,22 @@ async fn list_conns(
 ) -> Result<Response, LighthouseError> {
     let db = ctx.db.write().await;
 
-    let _pubkey_str = db
+    let pubkey_str = db
         .pubkey()
         .find_first(vec![lighthouse_prisma::pubkey::endpoint_id::equals(
             payload.id.clone(),
         )])
         .exec()
         .await?
-        .ok_or(LighthouseError::InvalidID)?;
+        .ok_or(LighthouseError::InvalidID)?
+        .pubkey;
 
-    // TODO: call verify func
+    verify_data(
+        &pubkey_str,
+        &payload.signature,
+        &payload.id,
+        payload.timestamp,
+    )?;
 
     let conns = db
         .pending_connection()
@@ -280,7 +281,12 @@ async fn list_conns(
     Ok(Json(ListConnResponse {
         conns: conns
             .iter()
-            .map(|rec| format!("{}:{}", rec.ip, rec.port))
+            .map(|rec| {
+                (
+                    format!("{}:{}", rec.ip, rec.port),
+                    hex::encode(rec.fingerprint.clone()),
+                )
+            })
             .collect(),
     })
     .into_response())
@@ -311,6 +317,7 @@ fn start_db_cleanup_worker(db_lock: Arc<RwLock<PrismaClient>>) {
             tokio::time::sleep(Duration::from_secs(10 * 60)).await;
             let db = db_lock.write().await;
             // TODO: flush old entries
+            drop(db);
         }
     });
 }
