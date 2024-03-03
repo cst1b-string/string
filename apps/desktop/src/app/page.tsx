@@ -10,28 +10,26 @@ export const themeContext = createContext({
 	setLightMode: (value: boolean) => {},
 });
 
-var hasAccount = false;
+var hasAccount = true;
 
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
+
 	if (!hasAccount) {
 		redirect("/signUp");
 	}
 	const [lightMode, setLightMode] = useState(false);
 
 	return (
-		<div className="grid grid-cols-3 divide-x divide-gray-400 h-[calc(100vh-80px)]">
+		<div className="grid grid-cols-[250px,1fr] divide-x divide-gray-400 h-[calc(100vh-80px)]">
 			<div className="">
 				<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
 			</div>
-			<div className="col-span-2 text-white font-bold ">
+			<div className="">
 				<ChatLog />
 				<div style={{ padding: "10px 0", position: "relative", left: "1%", width: "95%" }}>
 					<textarea placeholder="Type a message here..." color="neutral" />
 				</div>
-			</div>
-			<div className="col-span-2 text-white font-bold ">
-				<ChatLog />
 			</div>
 		</div>
 	);
