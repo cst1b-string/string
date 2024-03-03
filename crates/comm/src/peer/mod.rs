@@ -18,9 +18,7 @@ use std::{
     sync::Arc,
 };
 
-use chrono::Datelike;
 use prost_types::Timestamp;
-use rsntp::AsyncSntpClient;
 
 use string_protocol::{
     crypto, gossip, peers, try_decode_packet, try_encode_internal_packet, try_encode_packet,
@@ -79,9 +77,10 @@ pub struct Peer {
     pub peername: Option<String>,
     ///
     pub fingerprint: Vec<u8>,
-    /// Contains the timestamp for the last received AvailablePeers packet &
-    /// the vector of usernames of peers
-    pub available_peers: (Timestamp, HashSet<String>), 
+	/// Reference to the current time
+	pub curr_time: Arc<RwLock<Timestamp>>,
+    /// Contains the list of usernames of peers that are available to it
+    pub available_peers: HashSet<String>, 
 }
 
 impl fmt::Debug for Peer {
@@ -100,6 +99,7 @@ impl Peer {
         username: String,
         gossip_tx: mpsc::Sender<Gossip>,
         fingerprint: Vec<u8>,
+		curr_time: Arc<RwLock<Timestamp>>, 
         initiate: bool,
     ) -> Result<
         (
@@ -158,10 +158,12 @@ impl Peer {
                 state,
                 crypto,
                 peers,
-                username,
+                username: username.clone(),
                 peername: None,
                 fingerprint,
-                available_peers: (Self::get_utc_time().await?, HashSet::new()),
+				curr_time,
+				// peers contains itself
+                available_peers: HashSet::from_iter(vec![username]),
             },
             app_inbound_rx,
             net_outbound_rx,
@@ -192,12 +194,10 @@ impl Peer {
 
     /// Send the peers that we can see available right now
     pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
-        let timestamp = Self::get_utc_time().await?;
-
         let send_available_peers =
             ProtocolPacketType::PktSendAvailablePeers(peers::v1::SendAvailablePeers {
-                peers: self.available_peers.1.clone().into_iter().collect(),
-                time_sent: Some(timestamp),
+                peers: self.available_peers.clone().into_iter().collect(),
+                time_sent: Some(self.curr_time.read().await.clone()),
             });
 
         let packet_tosend = ProtocolPacket {
@@ -209,10 +209,10 @@ impl Peer {
     }
 
     /// Now that we've received peers from another person, we check if we can expand our own set of peers
-    pub fn received_available_peers(&mut self, peers: Vec<String>, time_sent: Option<Timestamp>) {
+    pub async fn received_available_peers(&mut self, peers: Vec<String>, time_sent: Option<Timestamp>) {
 		if let Some(time_sent) = time_sent{
-			if compare_timestamps(&self.available_peers.0, &time_sent){
-				let _ = self.available_peers.1.union(&HashSet::from_iter(peers));
+			if compare_timestamps(self.curr_time.read().await.clone(), time_sent){
+				let _ = self.available_peers.union(&HashSet::from_iter(peers));
 			}
         }
     }
@@ -443,22 +443,10 @@ impl Peer {
         Ok(())
     }
 
-    async fn get_utc_time() -> Result<Timestamp, PeerError> {
-        let client = AsyncSntpClient::new();
-        let result = client.synchronize("pool.ntp.org").await?;
-
-        let curr_time = result.datetime().into_chrono_datetime()?;
-        // unwrap here is safe (month is <= 12 and day is <= 31)
-        Ok(Timestamp::date(
-            curr_time.year().into(),
-            curr_time.month().try_into().unwrap(),
-            curr_time.day().try_into().unwrap(),
-        )?)
-    }
 }
 
 /// compares timestamps
-pub fn compare_timestamps(left: &Timestamp, right: &Timestamp) -> bool {
+pub fn compare_timestamps(left: Timestamp, right: Timestamp) -> bool {
     if left.seconds == right.seconds {
         return left.nanos < right.nanos;
     } 

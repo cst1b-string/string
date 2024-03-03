@@ -6,8 +6,6 @@ use crate::{
 use tokio::sync::mpsc::error::SendError;
 use string_protocol::{ProtocolPacket, PacketDecodeError, PacketEncodeError};
 use thiserror::Error;
-use rsntp::{ConversionError, SynchronizationError};
-use prost_types::TimestampError;
 
 /// An enumeration of possible errors that can occur when working with peers.
 #[derive(Error, Debug)]
@@ -33,13 +31,4 @@ pub enum PeerError {
     /// The packet we received does not conform to some format
     #[error("Bad packet")]
     BadPacket,
-	// Failure in converting to [Timestamp] because its out of range
-	#[error("Failure in converting to [Timestamp] because its out of range")]
-	TimeStampFail(#[from] TimestampError),
-	// Failure in converting to [Timestamp] because its out of range
-	#[error("Failure in internal timestamp conversion")]
-	ConvertFail(#[from] ConversionError),
-	// Failure in time synchronisation
-	#[error("Failure in time synchronization")]
-	SynchronizationFail(#[from] SynchronizationError),
 }

@@ -5,6 +5,8 @@ use tokio::sync::mpsc;
 
 use crate::peer::error::PeerError;
 use string_protocol::PacketDecodeError;
+use rsntp::{ConversionError, SynchronizationError};
+use prost_types::TimestampError;
 
 use super::Gossip;
 
@@ -41,6 +43,15 @@ pub enum SocketError {
     /// Failed to send gossip packet
     #[error("Failed to send gossip packet")]
     GossipSendError(#[from] Box<mpsc::error::SendError<Gossip>>),
+	// Failure in converting to [Timestamp] because its out of range
+	#[error("Failure in converting to [Timestamp] because its out of range")]
+	TimeStampFail(#[from] TimestampError),
+	// Failure in converting to [Timestamp] because its out of range
+	#[error("Failure in internal timestamp conversion")]
+	ConvertFail(#[from] ConversionError),
+	// Failure in time synchronisation
+	#[error("Failure in time synchronization")]
+	SynchronizationFail(#[from] SynchronizationError),
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
