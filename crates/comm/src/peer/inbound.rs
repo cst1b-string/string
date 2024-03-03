@@ -158,7 +158,7 @@ pub fn start_peer_receiver_worker(
 						)
 					}
                     SocketPacketType::SendAvailablePeers => {
-						
+
 					}
                     SocketPacketType::Data => {
                         // send ack
@@ -256,6 +256,16 @@ pub fn start_peer_receiver_worker(
                                     peer.add_peer_pubkey(&peerpubexchange.pubkey).await.unwrap()
                                 };
                             }
+							Some(ProtocolPacketType::PktSendAvailablePeers(send_available_peers)) => {
+								let mut peers_write = peers.write().await;
+								let peer = match peers_write.get_mut(&remote_addr){
+									Some(p) => p,
+									None => {
+										continue;
+									}
+								};
+								peer.received_available_peers(send_available_peers.peers, send_available_peers.time_sent);
+							}
                             _ => {}
                         }
 

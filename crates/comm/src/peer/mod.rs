@@ -177,6 +177,7 @@ impl Peer {
         Ok(())
     }
 
+    /// Ask a peer for the peers that they can see are available right now
     pub async fn request_available_peers(&mut self) -> Result<(), PeerError> {
         let request_available_peers =
             ProtocolPacketType::PktRequestAvailablePeers(peers::v1::RequestAvailablePeers {});
@@ -189,7 +190,7 @@ impl Peer {
         Ok(())
     }
 
-    ///
+    /// Send the peers that we can see available right now
     pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
         let timestamp = Self::get_utc_time().await?;
 
@@ -205,6 +206,15 @@ impl Peer {
 
         self.send_packet(packet_tosend).await?;
         Ok(())
+    }
+
+    /// Now that we've received peers from another person, we check if we can expand our own set of peers
+    pub fn received_available_peers(&mut self, peers: Vec<String>, time_sent: Option<Timestamp>) {
+		if let Some(time_sent) = time_sent{
+			if compare_timestamps(&self.available_peers.0, &time_sent){
+				let _ = self.available_peers.1.union(&HashSet::from_iter(peers));
+			}
+        }
     }
 
     /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
@@ -445,4 +455,12 @@ impl Peer {
             curr_time.day().try_into().unwrap(),
         )?)
     }
+}
+
+/// compares timestamps
+pub fn compare_timestamps(left: &Timestamp, right: &Timestamp) -> bool {
+    if left.seconds == right.seconds {
+        return left.nanos < right.nanos;
+    } 
+	left.seconds < right.seconds
 }
