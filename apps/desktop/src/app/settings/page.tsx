@@ -8,10 +8,15 @@ import { useRspc } from "@/integration";
 
 export default function Home() {
 
+	console.log("test");
+
 	const rspc = useRspc();
+	
 	const theme = rspc.useQuery(["settings.theme"]);
 
 	var initial_theme;
+
+	console.log(theme.data);
 
 	if (theme.data == "Light") {
 		initial_theme = true;
