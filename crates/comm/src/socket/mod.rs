@@ -430,14 +430,10 @@ fn start_gossip_worker(
 }
 
 /// Starts a background worker than can do certain chores at regular intervals
-fn start_periodic_worker(peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>) {
+fn start_periodic_worker(_peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(5000)).await;
-			let mut peers_write = peers.write().await;
-			for peer in peers_write.values_mut(){
-				try_continue!(peer.request_available_peers().await);
-			}
         }
     });
 }
