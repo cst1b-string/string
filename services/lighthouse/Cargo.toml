@@ -12,6 +12,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 axum = "0.7"
+axum-macros = "0.4.1"
 base64 = "0.21"
 chrono = "0.4"
 tower = { version = "0.4", features = [
@@ -26,5 +27,14 @@ tower-http = { version = "0.5", features = [
 	"compression-full",
 	"trace",
 ] }
+pgp = "0.11.0"
+sha2 = "0.10.8"
+nom = "7.1.3"
+hex = "0.4.3"
 
 lighthouse-prisma = { path = "../../crates/lighthouse-prisma" }
+
+[dependencies.prisma-client-rust]
+git = "https://github.com/Brendonovich/prisma-client-rust"
+tag = "0.6.11"
+default-features = false
