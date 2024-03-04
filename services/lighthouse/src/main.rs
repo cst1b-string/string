@@ -183,6 +183,19 @@ async fn register_endpoint(
         payload.timestamp,
     )?;
 
+    let existing_rec = db
+        .endpoint()
+        .find_first(vec![
+            lighthouse_prisma::endpoint::ip::equals(endpoint.ip().to_string()),
+            lighthouse_prisma::endpoint::port::equals(endpoint.port().into()),
+        ])
+        .exec()
+        .await?;
+
+    if let Some(rec) = existing_rec {
+        return Ok(Json(RegisterEndpointResponse { id: rec.id }).into_response());
+    }
+
     let endpoint_rec = db
         .endpoint()
         .create(

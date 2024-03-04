@@ -1,6 +1,7 @@
 use base64::prelude::*;
 use pgp::{composed::SignedSecretKey, types::SecretKeyTrait};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
     net::Ipv4Addr,
     str::{from_utf8, FromStr},
@@ -175,19 +176,39 @@ pub async fn list_conns(
 }
 
 pub fn encode_info_str(fingerprint: &String, lighthouse_url: &String, id: &String) -> String {
-    BASE64_STANDARD.encode(format!("{}#{}#{}", fingerprint, id, lighthouse_url).as_bytes())
+    let data = json!({
+        "f": fingerprint,
+        "i": id,
+        "l": lighthouse_url
+    });
+    BASE64_STANDARD.encode(data.to_string().as_bytes())
 }
 
 pub fn decode_info_str(
     info_str: &String,
 ) -> Result<(String, String, String), LighthouseClientError> {
     let raw = BASE64_STANDARD.decode(info_str)?;
-    let res: Vec<_> = from_utf8(&raw)
-        .map_err(|_| LighthouseClientError::InfostrError)?
-        .split('#')
-        .collect();
-    if res.len() != 3 {
-        return Err(LighthouseClientError::InfostrError);
-    }
-    Ok((res[0].to_string(), res[2].to_string(), res[1].to_string()))
+    let res: serde_json::Value =
+        serde_json::from_str(from_utf8(&raw).map_err(|_| LighthouseClientError::InfostrError)?)
+            .map_err(|_| LighthouseClientError::InfostrError)?;
+
+    let fingerprint = res
+        .get("f")
+        .ok_or(LighthouseClientError::InfostrError)?
+        .as_str()
+        .ok_or(LighthouseClientError::InfostrError)?
+        .to_string();
+    let id = res
+        .get("i")
+        .ok_or(LighthouseClientError::InfostrError)?
+        .as_str()
+        .ok_or(LighthouseClientError::InfostrError)?
+        .to_string();
+    let lighthouse = res
+        .get("l")
+        .ok_or(LighthouseClientError::InfostrError)?
+        .as_str()
+        .ok_or(LighthouseClientError::InfostrError)?
+        .to_string();
+    Ok((fingerprint, lighthouse, id))
 }
