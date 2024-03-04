@@ -1,15 +1,16 @@
 "use client";
 
+import { useRspc } from "@/integration";
 import { faker } from "@faker-js/faker";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import React from "react";
 
-const sentences = new Array(100).fill(true).map(() => faker.lorem.sentence({ min: 10, max: 30 })); // "The same sentence over and over again."); //
-
-export default function ChatLog() {
+export default function ChatLog({ selectedChannel }: { selectedChannel: number }) {
 	const parentRef = React.useRef<HTMLDivElement>(null);
+	const rspc = useRspc();
 
-	const count = sentences.length;
+	const sentences = rspc.useQuery(["channel.messages", selectedChannel]).data;
+	const count = sentences ? sentences.length : 1;
 	const virtualizer = useVirtualizer({
 		count,
 		getScrollElement: () => parentRef.current,
@@ -51,11 +52,13 @@ export default function ChatLog() {
 							ref={virtualizer.measureElement}
 							className={`${virtualRow.index % 2 === 0 ? "bg-transparent" : "bg-formBlue"}`}
 						>
-							<div className="py-2.5 relative w-11/12 left-2.5p">
+							<div className="py-2.5 relative w-11/12 left-2.5 text-white">
 								<div className="font-bold display-inline">
 									User {virtualRow.index % 2 ? "1" : "2"}:{" "}
 								</div>
-								<div className="font-normal">{sentences[virtualRow.index]} </div>
+								<div className="font-normal">
+									{sentences ? sentences[virtualRow.index]?.content : ""}{" "}
+								</div>
 							</div>
 						</div>
 					))}
