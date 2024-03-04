@@ -1,7 +1,6 @@
 "use client";
 
 import { useRspc } from "@/integration";
-import { faker } from "@faker-js/faker";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import React from "react";
 
@@ -27,7 +26,7 @@ export default function ChatLog({ selectedChannel }: { selectedChannel: number }
 		<div
 			ref={parentRef}
 			// 90p defined in tailwind.config.ts
-			className="overflow-y-auto relative h-90p"
+			className="overflow-y-auto relative h-full"
 			style={{
 				contain: "strict",
 			}}
