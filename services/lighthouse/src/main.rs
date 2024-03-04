@@ -37,11 +37,11 @@ enum LighthouseError {
     #[error("failed to parse endpoint ip:port pair")]
     EndpointParseError(#[from] AddrParseError),
     #[error("failed to use public key")]
-    PubkeyError(#[from] pgp::errors::Error),
+    PubKeyError(#[from] pgp::errors::Error),
     #[error("failed to verify signature")]
-    SigError,
+    SignatureError,
     #[error("no such ID")]
-    InvalidID,
+    InvalidId,
     #[error("invalid fingerprint")]
     InvalidFingerprint(#[from] hex::FromHexError),
 }
