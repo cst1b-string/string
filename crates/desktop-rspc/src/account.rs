@@ -13,16 +13,16 @@ use rspc::{RouterBuilder, Type};
 use serde::Deserialize;
 use smallvec::smallvec;
 use string_comm::Socket;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::{context::StatefulSocket, Ctx};
 
 /// The account context.
 pub struct AccountContext {
     /// The directory where the keys are stored.
-    key_dir: PathBuf,
+    pub key_dir: PathBuf,
     /// The fingerprint of the active user.
-    fingerprint: Mutex<Option<Vec<u8>>>,
+    pub fingerprint: RwLock<Option<Vec<u8>>>,
 }
 
 impl AccountContext {
@@ -74,13 +74,13 @@ async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<bool, rspc::Error> {
     })?;
 
     // check if socket is active
-    let mut socket = ctx.socket.lock().await;
+    let mut socket = ctx.socket.write().await;
     if matches!(*socket, StatefulSocket::Active(_)) {
         return Ok(true);
     }
 
     // store user fingerprint
-    let mut fingerprint = ctx.account_ctx.fingerprint.lock().await;
+    let mut fingerprint = ctx.account_ctx.fingerprint.write().await;
     *fingerprint = Some(secret_key.public_key().fingerprint());
 
     // create new socket
@@ -146,14 +146,14 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<bool, rspc:
     )
     .expect("Error writing privkey");
 
-    // check if socket is active
-    let mut socket = ctx.socket.lock().await;
+    // check if socket is active - technically code dupe but shhhh
+    let mut socket = ctx.socket.write().await;
     if matches!(*socket, StatefulSocket::Active(_)) {
         return Ok(true);
     }
 
     // store user fingerprint
-    let mut fingerprint = ctx.account_ctx.fingerprint.lock().await;
+    let mut fingerprint = ctx.account_ctx.fingerprint.write().await;
     *fingerprint = Some(secret_key.public_key().fingerprint());
 
     // create new socket

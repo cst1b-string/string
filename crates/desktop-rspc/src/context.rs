@@ -2,7 +2,7 @@ use std::path::Path;
 
 use string_comm::Socket;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
 /// The context type for the router.
 pub struct Context {
     /// The communication socket.
-    pub socket: Mutex<StatefulSocket>,
+    pub socket: RwLock<StatefulSocket>,
     /// The Prisma client for the cache.
     pub cache: cache_prisma::PrismaClient,
     /// The settings for the application.
@@ -62,7 +62,7 @@ impl Context {
         info!("- Settings path: {:?}", settings_path);
 
         Ok(Self {
-            socket: Mutex::new(StatefulSocket::Inactive),
+            socket: StatefulSocket::Inactive.into(),
             cache: cache_prisma::new_client_with_url(&sqlite_path).await?,
             account_ctx: AccountContext::from_data_dir(&data_dir),
             settings_ctx: SettingsContext::from_data_dir(&data_dir).await?,
