@@ -23,7 +23,7 @@ pub enum LighthouseClientError {
     #[error("failed to decode base64 info string")]
     Base64Error(#[from] base64::DecodeError),
     #[error("invalid info string format")]
-    InfostrError,
+    InfoStringError,
 }
 
 #[derive(Serialize)]
