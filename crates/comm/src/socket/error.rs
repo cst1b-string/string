@@ -43,7 +43,7 @@ pub enum SocketError {
     GossipSendError(#[from] Box<mpsc::error::SendError<Gossip>>),
     /// STUN error
     #[error("STUN error")]
-    STUNError,
+    StunError,
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
