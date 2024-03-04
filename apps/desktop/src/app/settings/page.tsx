@@ -8,15 +8,14 @@ import { useRspc } from "@/integration";
 
 export default function Home() {
 
-	console.log("test");
-
 	const rspc = useRspc();
 	
 	const theme = rspc.useQuery(["settings.theme"]);
+	//rspc.useQuery(["user.list"])
 
 	var initial_theme;
 
-	console.log(theme.data);
+	//console.log(theme.data);
 
 	if (theme.data == "Light") {
 		initial_theme = true;
@@ -34,11 +33,28 @@ export default function Home() {
 	const [username, setUsername] = useState("<Username from Tauri>");
 	const [bio, setBio] = useState("<Bio from Tauri>");
 
+	const {mutate} = rspc.useMutation(["settings.theme"]);
+
+	function lightModeChange() { 
+
+		console.log(lightMode);
+
+		if (!lightMode) {
+			console.log("test2: light");
+			mutate("Light");
+		}
+		else {
+			console.log("test1: dark");
+			mutate("Dark");
+		}
+		setLightMode(!lightMode);
+	}
+
 	return (
 		<div className="flex flex-row justify-center py-5">
 			<div className="flex flex-col space-y-4 w-[600px]">
 				<div className="flex  justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
-					<button onClick={() => setLightMode(!lightMode)}>{lightModeText}</button>
+					<button onClick={() => lightModeChange()}>{lightModeText}</button>
 				</div>
 
 				<form
