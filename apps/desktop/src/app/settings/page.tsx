@@ -1,60 +1,30 @@
 "use client";
 
-import { useContext, useMemo, useState } from "react";
-
-import { ThemeContext } from "../layout";
-
 import { useRspc } from "@/integration";
+import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
-
 	const rspc = useRspc();
-	
-	const theme = rspc.useQuery(["settings.theme"]);
-	//rspc.useQuery(["user.list"])
 
-	var initial_theme;
+	const { data, refetch } = rspc.useQuery(["settings.theme"]);
+	const { mutate, isSuccess } = rspc.useMutation(["settings.theme"]);
 
-	//console.log(theme.data);
+	useEffect(() => {
+		refetch();
+	}, [isSuccess]);
 
-	if (theme.data == "Light") {
-		initial_theme = true;
-	}
-	else {
-		initial_theme = false;
-	}
-
-	const [lightMode, setLightMode] = useState(initial_theme);
-
-	//const { lightMode, setLightMode } = useContext(ThemeContext);
-
-	const lightModeText = useMemo(() => (lightMode ? "Dark Mode" : "Light Mode"), [lightMode]);
+	const lightModeText = useMemo(() => (data === "Dark" ? "Dark Mode" : "Light Mode"), [data]);
 
 	const [username, setUsername] = useState("<Username from Tauri>");
 	const [bio, setBio] = useState("<Bio from Tauri>");
-
-	const {mutate} = rspc.useMutation(["settings.theme"]);
-
-	function lightModeChange() { 
-
-		console.log(lightMode);
-
-		if (!lightMode) {
-			console.log("test2: light");
-			mutate("Light");
-		}
-		else {
-			console.log("test1: dark");
-			mutate("Dark");
-		}
-		setLightMode(!lightMode);
-	}
 
 	return (
 		<div className="flex flex-row justify-center py-5">
 			<div className="flex flex-col space-y-4 w-[600px]">
 				<div className="flex  justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
-					<button onClick={() => lightModeChange()}>{lightModeText}</button>
+					<button onClick={() => mutate(data === "Dark" ? "Light" : "Dark")}>
+						{lightModeText}
+					</button>
 				</div>
 
 				<form
