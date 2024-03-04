@@ -15,6 +15,13 @@ export default function ChatSidebar({
 }) {
 	const rspc = useRspc();
 	// const { data } = rspc.useQuery(["channel.list"]);
+
+	const [isExpanded, setIsExpanded] = useState(false);
+	const toggleExpansion = () => {
+		setIsExpanded(!isExpanded);
+	};
+	const align = isExpanded ? "items-start ml-3" : "items-center";
+
 	const channel1: Channel = {
 		id: 1,
 		title: "New Channel",
@@ -55,35 +62,50 @@ export default function ChatSidebar({
 	};
 
 	return (
-		<div className="px-2 flex flex-col items-center no-scrollbar overflow-auto space-y-4 bg-darkGrey h-full w-20 py-2">
-			<div className="grid grid-cols-5 space-x-1">
-				<input
-					id="search"
-					type="text"
-					placeholder="Search"
-					className="px-1 py-1 rounded bg-buttonBlue text-white col-span-4"
-					onChange={handleSearch}
-				/>
-				<Link href="./newChat">
-					<button className="pl-1 bg-transparent hover:bg-hoverBlue text-white w-full py-1 rounded col-span-1">
-						+
-					</button>
-				</Link>
-			</div>
-			{data &&
-				data.map((channel) => (
-					<div
-						key={channel.id}
-						className={` text-white w-full py-3 rounded ${
-							filteredChannels.has(channel.id) ? "hidden" : ""
-						} ${
-							selectedChannel == channel.id ? "bg-buttonBlue" : "bg-transparent hover:bg-hoverBlue"
-						}`}
-						onClick={() => handleChannelClick(channel)}
-					>
-						<CircularChatButton chatName={channel.title} />
+		<div className={`h-full ${isExpanded ? "min-w-70" : "min-w-20"}`}>
+			<div className="px-2 justify-between flex flex-col items-center no-scrollbar overflow-auto space-y-4 bg-darkGrey h-full w-20 py-2">
+				<div className="grid grid-cols-5 space-x-1">
+					<input
+						id="search"
+						type="text"
+						placeholder="Search"
+						className="px-1 py-1 rounded bg-buttonBlue text-white col-span-4"
+						onChange={handleSearch}
+					/>
+					<Link href="./newChat">
+						<button className="pl-1 bg-transparent hover:bg-hoverBlue text-white w-full py-1 rounded col-span-1">
+							+
+						</button>
+					</Link>
+					<div className="flex flex-col items-center pt-2">
+						<button
+							onClick={toggleExpansion}
+							className="mt-auto mb-2 text-white font-bold text-2xl"
+						>
+							{isExpanded ? "-" : "+"}
+						</button>
 					</div>
-				))}
+				</div>
+				{data &&
+					data.map((channel) => (
+						<div
+							key={channel.id}
+							className={` text-white w-full py-3 rounded ${
+								filteredChannels.has(channel.id) ? "hidden" : ""
+							} ${
+								selectedChannel == channel.id
+									? "bg-buttonBlue"
+									: "bg-transparent hover:bg-hoverBlue"
+							}`}
+							onClick={() => handleChannelClick(channel)}
+						>
+							<CircularChatButton chatName={channel.title} />
+						</div>
+					))}
+				<div className={`flex flex-col items-start pt-2 ${align}`}>
+					<CircularChatButton chatName="+" isExpanded={isExpanded} />
+				</div>
+			</div>
 		</div>
 	);
 }
