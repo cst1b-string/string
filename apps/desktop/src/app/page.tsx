@@ -21,14 +21,14 @@ export default function Home() {
 	const [lightMode, setLightMode] = useState(false);
 
 	return (
-		<div className="grid grid-cols-[auto,1fr] divide-x divide-gray-400 h-[calc(100vh-80px)]">
+		<div className="grid grid-cols-[auto,1fr] h-[calc(100vh-60px)]">
 			<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
-			<div className="grid grid-rows-[1fr,auto] h-full divide-y divide-gray-400">
+			<div className="grid grid-rows-[1fr,auto] h-full">
 				<ChatLog selectedChannel={selectedChannel} />
 				<div className="px-2 py-2 min-h-16">
 					<textarea 
 						placeholder="Type a message here..."
-						className="px-1 w-full input rounded bg-buttonBlue text-white" 
+						className="px-1 h-16 w-full input rounded bg-darkSidebar text-darkText" 
 					/>
 				</div>
 			</div>
