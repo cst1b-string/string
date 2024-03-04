@@ -8,14 +8,21 @@ export const CircularChatButton: React.FC<{ chatName: string; isExpanded: boolea
 	// specific case for new chat button (because it has a different colour)
 	if (chatName == "+") {
 		return (
-			<div>
-				<Link
-					href="./newChat"
-					className={`flex items-center justify-center min-h-14 ${isExpanded ? "w-28" : "w-14"}  h-14 rounded-xl bg-buttonBlue hover:bg-hoverBlue text-white  text-4xl`}
-				>
-					+
-				</Link>
-			</div>
+			<Link href="./newChat">
+				<div className={`flex  items-center ${isExpanded ? "min-w-50" : "min-w-14"}`}>
+					<button
+						className={`flex items-center justify-center min-h-14 w-14  h-14 rounded-xl bg-darkSidebar  text-white  text-4xl`}
+					>
+						+ 
+					</button>
+					{isExpanded && (
+						<span className="text-white font-semibold ml-3 mr-2 overflow-visible whitespace-pre">
+							New Chat
+						</span>
+					)}
+				</div>
+			</Link>
+			
 		);
 	} else {
 		// get first three words in chat name
@@ -26,7 +33,7 @@ export const CircularChatButton: React.FC<{ chatName: string; isExpanded: boolea
 		let serverName = chatName.length >= 10 ? chatName.slice(0, 8) + "..." : chatName.slice(0, 8);
 		return (
 			<div className={`flex items-center ${isExpanded ? "min-w-50" : "min-w-14"}`}>
-				<button className="flex items-center justify-center min-w-14 h-14 rounded-xl bg-formBlue text-white text-xl">
+				<button className="flex items-center justify-center min-w-14 h-14 rounded-xl bg-darkCircularChatButton text-white text-xl">
 					{innerText}
 				</button>
 				{isExpanded && (
