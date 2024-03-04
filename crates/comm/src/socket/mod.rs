@@ -35,6 +35,8 @@ use string_protocol::crypto;
 
 use pgp::composed::SignedSecretKey;
 
+use stunclient::StunClient;
+
 /// Number of peers to send gossip to
 const GOSSIP_COUNT: usize = 3;
 
@@ -77,6 +79,8 @@ pub struct Socket {
     pub username: String,
     /// Channel used to send gossip
     pub gossip_tx: mpsc::Sender<Gossip>,
+    /// How our socket is seen externally
+    pub external: SocketAddr,
 }
 
 impl Socket {
@@ -84,10 +88,16 @@ impl Socket {
     /// starts the background tasks that handle sending and receiving packets.
     pub async fn bind(addr: SocketAddr, secret_key: SignedSecretKey) -> Result<Self, SocketError> {
         // bind socket
-        let socket: Arc<_> = UdpSocket::bind(addr)
+
+        let raw_socket = UdpSocket::bind(addr).await.map_err(SocketError::IoError)?;
+
+        let google_stun = StunClient::with_google_stun_server();
+        let external = google_stun
+            .query_external_address_async(&raw_socket)
             .await
-            .map_err(SocketError::IoError)?
-            .into();
+            .map_err(|_| SocketError::STUNError)?;
+
+        let socket: Arc<_> = raw_socket.into();
 
         // create peers map
         let peers = Arc::new(RwLock::new(HashMap::new()));
@@ -121,6 +131,7 @@ impl Socket {
             crypto,
             username,
             gossip_tx,
+            external,
         })
     }
 

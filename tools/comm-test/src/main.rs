@@ -4,7 +4,7 @@ use std::{
     env,
     fs::File,
     io::{self, Read, Write},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -156,14 +156,6 @@ async fn main() {
     let myfingerprint = secret_key.public_key().fingerprint();
 
     info!("[+] Key loaded!");
-    let myid = lighthouse::register_endpoint(&lighthouse_url, None, bind_port, secret_key.clone())
-        .await
-        .expect("failed to register endpoint");
-
-    let myfingerprint_hex = hex::encode(myfingerprint.clone());
-    let info_str = lighthouse::encode_info_str(&myfingerprint_hex, &lighthouse_url, &myid);
-
-    info!("[+] Info string: {0}", info_str);
 
     // bind to the socket
     let socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), secret_key.clone()).await {
@@ -173,6 +165,26 @@ async fn main() {
             return;
         }
     };
+
+    let myid: String;
+    if let IpAddr::V4(ipv4) = socket.external.ip() {
+        myid = lighthouse::register_endpoint(
+            &lighthouse_url,
+            Some(ipv4),
+            socket.external.port(),
+            secret_key.clone(),
+        )
+        .await
+        .expect("failed to register endpoint");
+
+        let myfingerprint_hex = hex::encode(myfingerprint.clone());
+        let info_str = lighthouse::encode_info_str(&myfingerprint_hex, &lighthouse_url, &myid);
+
+        info!("[+] Info string: {0}", info_str);
+    } else {
+        error!("[-] IPv6 not supported");
+        return;
+    }
 
     // add peers
     let senders: Arc<RwLock<Vec<mpsc::Sender<ProtocolPacket>>>> = Arc::new(RwLock::new(Vec::new()));

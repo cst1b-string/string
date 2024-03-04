@@ -41,6 +41,9 @@ pub enum SocketError {
     /// Failed to send gossip packet
     #[error("Failed to send gossip packet")]
     GossipSendError(#[from] Box<mpsc::error::SendError<Gossip>>),
+    /// STUN error
+    #[error("STUN error")]
+    STUNError,
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.
