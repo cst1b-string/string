@@ -10,6 +10,8 @@ export const SettingsButton = () => {
 	return (
 		<Link href="/settings">
 			<Image src="/settings-gear.png" alt="Settings" width={40} height={30} />
+		<Link href="/settings">
+			<Image src="/settings-gear.png" alt="Settings" width={40} height={30} />
 		</Link>
 	);
 };

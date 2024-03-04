@@ -21,6 +21,17 @@ body {
 	.text-balance {
 		text-wrap: balance;
 	}
+
+	/* this hides scrollbar for chrome based browsers */
+	.no-scrollbar::-webkit-scrollbar {
+		display: none;
+	}
+
+	/* this hides scrollbar for firefox & microsoft edge*/
+	.no-scrollbar {
+		-ms-overflow-style: none;
+		scrollbar-width: none;
+	}
 }
 
 .input {

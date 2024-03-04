@@ -4,6 +4,8 @@ import { useRspc } from "@/integration";
 import { Channel } from "@/integration/bindings";
 import Link from "next/link";
 import { useState } from "react";
+import { CircularChatButton } from "@/components/circularChatButton";
+import { faker } from "@faker-js/faker";
 
 export default function ChatSidebar({
 	selectedChannel,
@@ -53,6 +55,10 @@ export default function ChatSidebar({
 		setFilteredChannels(currFilteredChannels);
 	};
 
+
+
+
+export default function ChatSidebar() {
 	return (
 		<div className="px-2 py-2 grid space-y-1">
 			<div className="grid grid-cols-5 space-x-1">
@@ -83,6 +89,12 @@ export default function ChatSidebar({
 						{channel.title}
 					</button>
 				))}
+		// "no-scrollbar" defined in globals.css
+		<div className="flex flex-col items-center no-scrollbar overflow-auto space-y-4 bg-darkGrey h-full w-20 pt-2 pb-2"> 
+			{chatNames.map((chatName, index) => (
+				<CircularChatButton key={index} chatName={chatName} />
+			))}
+			<CircularChatButton chatName = "+"/>
 		</div>
 	);
 }
