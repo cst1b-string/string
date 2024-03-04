@@ -4,11 +4,8 @@
 mod crypto;
 
 use desktop_rspc::Context;
-use string_comm::{Socket, DEFAULT_PORT};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-use crate::crypto::generate_key;
 
 #[tokio::main]
 async fn main() {
@@ -30,19 +27,6 @@ async fn main() {
     // rspc router for communicating with frontend
     let router = desktop_rspc::build_router();
 
-    // crenerate example key
-    info!("Generating example key...");
-    let key = generate_key("Example".to_string(), "password".to_string());
-
-    // bind to socket
-    info!(
-        "Launching socket listener on {}:{}",
-        "127.0.0.1", DEFAULT_PORT
-    );
-    let socket = Socket::bind(([127, 0, 0, 1], DEFAULT_PORT).into(), key)
-        .await
-        .expect("failed to bind socket");
-
     // get app data dir and create it if it doesn't exist
     let data_dir = app.handle().path_resolver().app_data_dir().unwrap();
     std::fs::create_dir_all(&data_dir).expect("failed to create app data directory");
@@ -50,7 +34,7 @@ async fn main() {
     // create context
     info!("Creating application context...");
     let ctx = desktop_rspc::Ctx::new(
-        Context::new(socket, data_dir)
+        Context::new(data_dir)
             .await
             .expect("failed to create context"),
     );

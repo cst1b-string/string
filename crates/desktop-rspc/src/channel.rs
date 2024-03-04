@@ -11,6 +11,7 @@ pub fn attach_channel_queries<TMeta: Send>(
         .query("channel.list", |t| t(list_channels))
         .query("channel.messages", |t| t(get_channel_messages))
         .mutation("channel.create", |t| t(create_channel))
+        .mutation("channel.send", |t| t(send_message))
 }
 
 /// Fetch a list of channels from the cache.
@@ -76,4 +77,12 @@ pub async fn create_channel(
                 err,
             )
         })
+}
+
+/// Send a message to the network.
+async fn send_message(ctx: Ctx, content: String) -> Result<(), rspc::Error> {
+    Err(rspc::Error::new(
+        ErrorCode::InternalServerError,
+        "send_message is not implemented".into(),
+    ))
 }

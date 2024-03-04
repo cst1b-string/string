@@ -4,17 +4,15 @@ mod account;
 mod channel;
 mod context;
 mod event;
-mod message;
 mod settings;
 mod user;
 
 use std::{path::Path, sync::Arc};
 
-use account::attach_crypto_queries;
+use account::attach_account_queries;
 use channel::attach_channel_queries;
 pub use context::Context;
 use event::attach_event_queries;
-use message::attach_message_queries;
 use rspc::{Config, Router};
 use settings::attach_settings_queries;
 use user::attach_user_queries;
@@ -41,12 +39,11 @@ fn build_router_with<P: AsRef<Path>>(bindings: Option<P>) -> Router<Ctx> {
     let builder = Router::<Ctx>::new().config(config);
 
     // attach queries
-    let builder = attach_settings_queries(builder);
-    let builder = attach_message_queries(builder);
+    let builder = attach_account_queries(builder);
     let builder = attach_channel_queries(builder);
-    let builder = attach_user_queries(builder);
     let builder = attach_event_queries(builder);
-    let builder = attach_crypto_queries(builder);
+    let builder = attach_settings_queries(builder);
+    let builder = attach_user_queries(builder);
 
     builder.build()
 }
