@@ -1,8 +1,6 @@
 import Link from "next/link";
 import React from "react";
 
-import { ChatTooltip } from "./tooltip";
-
 export const CircularChatButton: React.FC<{ chatName: string; isExpanded: boolean }> = ({
 	chatName,
 	isExpanded,
@@ -13,11 +11,10 @@ export const CircularChatButton: React.FC<{ chatName: string; isExpanded: boolea
 			<div>
 				<Link
 					href="./newChat"
-					className="flex items-center justify-center min-h-14 w-14 h-14 rounded-xl bg-lightGrey hover:bg-discordGreen text-discordGreen hover:text-white text-4xl"
+					className={`flex items-center justify-center min-h-14 ${isExpanded ? "w-28" : "w-14"}  h-14 rounded-xl bg-buttonBlue hover:bg-hoverBlue text-white  text-4xl`}
 				>
 					+
 				</Link>
-				{/* <ChatTooltip tooltip={chatName}/> */}
 			</div>
 		);
 	} else {
@@ -29,18 +26,14 @@ export const CircularChatButton: React.FC<{ chatName: string; isExpanded: boolea
 		let serverName = chatName.length >= 10 ? chatName.slice(0, 8) + "..." : chatName.slice(0, 8);
 		return (
 			<div className={`flex items-center ${isExpanded ? "min-w-50" : "min-w-14"}`}>
-				<Link
-					href={chatName}
-					className="flex items-center justify-center min-w-14 h-14 min-h-14 rounded-xl bg-lightGrey hover:bg-hoverLightGrey text-white text-xl"
-				>
+				<button className="flex items-center justify-center min-w-14 h-14 rounded-xl bg-formBlue text-white text-xl">
 					{innerText}
-				</Link>
+				</button>
 				{isExpanded && (
 					<span className="text-white font-semibold ml-3 mr-2 overflow-visible whitespace-pre">
 						{serverName}
 					</span>
 				)}
-				{/* <ChatTooltip tooltip={chatName}/> */}
 			</div>
 		);
 	}

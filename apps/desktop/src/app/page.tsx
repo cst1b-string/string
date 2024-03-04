@@ -21,7 +21,7 @@ export default function Home() {
 	const [lightMode, setLightMode] = useState(false);
 
 	return (
-		<div className="grid grid-cols-[250px,1fr] divide-x divide-gray-400 h-[calc(100vh-80px)]">
+		<div className="grid grid-cols-[auto,1fr] divide-x divide-gray-400 h-[calc(100vh-80px)]">
 			<div className="">
 				<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
 			</div>

@@ -26,13 +26,13 @@ export default function ChatLog() {
 		<div
 			ref={parentRef}
 			// 90p defined in tailwind.config.ts
-			className = "overflow-y-auto relative h-90p"
+			className="overflow-y-auto relative h-90p"
 			style={{
 				contain: "strict",
 			}}
 		>
 			<div
-				className = "relative w-full"
+				className="relative w-full"
 				style={{
 					height: virtualizer.getTotalSize(),
 				}}
@@ -49,12 +49,13 @@ export default function ChatLog() {
 							// style={{ backgroundColor: virtualRow.index % 2 ? "#2a2a54" : "#212141" }}
 							data-index={virtualRow.index}
 							ref={virtualizer.measureElement}
-							className={`${virtualRow.index % 2 === 0 ? "bg-darkGrey" : "bg-navbarGrey"}`}
+							className={`${virtualRow.index % 2 === 0 ? "bg-transparent" : "bg-formBlue"}`}
 						>
 							<div className="py-2.5 relative w-11/12 left-2.5p">
-								<div className="font-bold display-inline">User {virtualRow.index % 2 ? "1" : "2"}: </div>
-								<div className="font-normal">
-									{sentences[virtualRow.index]} </div>
+								<div className="font-bold display-inline">
+									User {virtualRow.index % 2 ? "1" : "2"}:{" "}
+								</div>
+								<div className="font-normal">{sentences[virtualRow.index]} </div>
 							</div>
 						</div>
 					))}

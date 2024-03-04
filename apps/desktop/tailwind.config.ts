@@ -15,12 +15,16 @@ const config: Config = {
 				darkGrey: "#16181b",
 				discordGreen: "#23a559",
 				navbarGrey: "#202327",
+				navbarBlue: "#191970",
+				formBlue: "#113355",
+				buttonBlue: "#335577",
+				hoverBlue: "#224466",
 			},
 			height: {
 				"90p": "90%",
 			},
 			width: {
-				"90p": "90%"
+				"90p": "90%",
 			},
 			inset: {
 				"2.5p": "2.5%",
@@ -35,12 +39,6 @@ const config: Config = {
 				2: "2px",
 				4: "4px",
 				8: "8px",
-			},
-			colors: {
-				navbarBlue: "#191970",
-				formBlue: "#113355",
-				buttonBlue: "#335577",
-				hoverBlue: "#224466",
 			},
 		},
 	},
