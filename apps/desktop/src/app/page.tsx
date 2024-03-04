@@ -2,7 +2,6 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
-import Textarea from "@mui/joy/Textarea";
 import { redirect } from "next/navigation";
 import { createContext, useState } from "react";
 
@@ -23,18 +22,13 @@ export default function Home() {
 
 	return (
 		<div className="grid grid-cols-[auto,1fr] divide-x divide-gray-400 h-[calc(100vh-80px)]">
-			<div className="">
-				<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
-			</div>
-			<div className="">
+			<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
+			<div className="grid grid-rows-[1fr,auto] h-full divide-y divide-gray-400">
 				<ChatLog selectedChannel={selectedChannel} />
-				<div style={{ padding: "10px 0", position: "relative", left: "1%", width: "95%" }}>
-					<Textarea
+				<div className="px-2 py-2 min-h-16">
+					<textarea 
 						placeholder="Type a message here..."
-						color="neutral"
-						maxRows={3}
-						variant="soft"
-						className="input"
+						className="px-1 w-full input rounded bg-buttonBlue text-white" 
 					/>
 				</div>
 			</div>
