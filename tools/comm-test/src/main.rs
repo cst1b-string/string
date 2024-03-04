@@ -4,7 +4,7 @@ use std::{
     env,
     fs::File,
     io::{self, Read, Write},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -167,15 +167,14 @@ async fn main() {
     };
 
     let myid: String;
+    let myip: Option<Ipv4Addr>;
+    let myport: u16;
     if let IpAddr::V4(ipv4) = socket.external.ip() {
-        myid = lighthouse::register_endpoint(
-            &lighthouse_url,
-            Some(ipv4),
-            socket.external.port(),
-            secret_key.clone(),
-        )
-        .await
-        .expect("failed to register endpoint");
+        myip = Some(ipv4);
+        myport = socket.external.port();
+        myid = lighthouse::register_endpoint(&lighthouse_url, myip, myport, secret_key.clone())
+            .await
+            .expect("failed to register endpoint");
 
         let myfingerprint_hex = hex::encode(myfingerprint.clone());
         let info_str = lighthouse::encode_info_str(&myfingerprint_hex, &lighthouse_url, &myid);
@@ -365,8 +364,8 @@ async fn main() {
                         let target = lighthouse::lookup_endpoint(
                             &target_lh_url,
                             id,
-                            None,
-                            bind_port,
+                            myip,
+                            myport,
                             &myfingerprint,
                         )
                         .await
