@@ -17,7 +17,7 @@ pub enum LighthouseClientError {
     #[error("failed to make web request")]
     RequestError(#[from] reqwest::Error),
     #[error("failed to export pubkey")]
-    PubkeyError(#[from] pgp::errors::Error),
+    PubKeyError(#[from] pgp::errors::Error),
     #[error("failed to create signature")]
     SigningError(#[from] SigningError),
     #[error("failed to decode base64 info string")]
