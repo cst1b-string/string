@@ -199,46 +199,6 @@ async fn main() {
     let socket_locked = Arc::new(RwLock::new(socket));
     let socket_locked_1 = socket_locked.clone();
 
-    // for (i, peer_addr) in peer_addrs.iter().enumerate() {
-    //     let fingerprint = hex::decode(&fingerprints[i]).expect("Invalid fingerprint format");
-    //     let (app_outbound_tx, app_inbound_rx) =
-    //         socket.add_peer(*peer_addr, fingerprint, initiate).await;
-    //     senders.push(app_outbound_tx);
-    //     receivers.push(app_inbound_rx);
-    // }
-
-    // info!("[+] Setup success");
-    // info!("[*] Attempting transmission...");
-
-    // // Wait 5 mins
-    // let mut ready_peers: Vec<usize> = Vec::new();
-
-    // let mut tick: u16 = 0;
-
-    // while tick < 5 * 60 * 2 && ready_peers.len() != peer_addrs.len() {
-    //     for (i, _) in peer_addrs.iter().enumerate() {
-    //         if !ready_peers.contains(&i) {
-    //             match socket.get_peer_state(peer_addrs[i]).await {
-    //                 None => {}
-    //                 Some(s) => {
-    //                     if s == PeerState::Established {
-    //                         info!("[+] Connection with {0} succeeded!", peer_addrs[i]);
-    //                         ready_peers.push(i);
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     tick += 1;
-    //     tokio::time::sleep(Duration::from_millis(500)).await;
-    // }
-
-    // check if the connection is ready
-    // if ready_peers.len() != peer_addrs.len() {
-    //     error!("[-] Connection failure.");
-    //     return;
-    // }
-
     info!("[+] Use /conn <info string> to connect to a new peer");
     info!("[+] Use /dr <username> to start a chat with user");
     info!("[+] Then use /msg <username> <message> to send a message");
