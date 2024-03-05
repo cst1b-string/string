@@ -4,12 +4,14 @@ use std::{
     env,
     fs::File,
     io::{self, Read, Write},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
+    sync::Arc,
     time::Duration,
 };
-use string_comm::{peer::PeerState, Socket};
+use string_comm::Socket;
 use string_protocol::{messages, AttachmentType, ProtocolPacket, ProtocolPacketType};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 
@@ -22,25 +24,20 @@ use pgp::{
 
 use image::{guess_format, ImageFormat};
 
+mod lighthouse;
+
 /// comm-test is a simple tool to test the string-comm crate.
 #[derive(Debug, Parser)]
 struct Args {
     /// The source port to bind to.
-    #[clap(long, required = false)]
-    port: Option<u16>,
-    /// The destination IP address to add as a peer.
-    #[clap(long, value_delimiter = ',')]
-    addrs: Vec<SocketAddr>,
-    /// Fingerprint string of each peer
-    #[clap(value_delimiter = ',', long)]
-    fingerprints: Vec<String>,
-    /// Whether to initiate the connection.
     #[clap(long)]
-    initiate: bool,
-    #[clap(long, required = true)]
+    port: u16,
+    /// URL of lighthouse
+    #[clap(long)]
+    lighthouse_url: String,
+    /// Username of node, needed for cert gen
+    #[clap(long)]
     username: String,
-    #[clap(long)]
-    generate: bool,
 }
 
 fn generate_key(username: String, password: String) -> SignedSecretKey {
@@ -86,10 +83,11 @@ fn save_key(location: &String, key: SignedSecretKey) {
     .expect("Error writing privkey");
 }
 
-fn get_key_path() -> String {
+fn get_key_path(username: &String) -> String {
     let cwd = env::current_dir().expect("Failed to get current dir");
     let cwd_str = cwd.to_str().expect("Failed to convert dir to string");
-    format!("{cwd_str}/key.asc")
+    // Please don't put ../ or null bytes in the username :(
+    format!("{cwd_str}/{username}.asc")
 }
 
 fn construct_image(image_data: &Vec<u8>) -> messages::v1::MessageAttachment {
@@ -129,12 +127,13 @@ fn display_attachments(username: String, attachments: Vec<messages::v1::MessageA
 async fn main() {
     let Args {
         port: bind_port,
-        initiate,
-        addrs: peer_addrs,
-        fingerprints,
+        lighthouse_url,
         username,
-        generate,
     } = Args::parse();
+
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "info")
+    }
 
     // initialise tracing
     tracing_subscriber::fmt()
@@ -145,7 +144,7 @@ async fn main() {
         )
         .init();
 
-    let key_path = get_key_path();
+    let key_path = get_key_path(&username);
     let secret_key = match load_key(&key_path) {
         Some(secret) => secret,
         None => {
@@ -155,28 +154,12 @@ async fn main() {
             secret
         }
     };
-
-    // I am hoping by only checking < instead of !=, I can leave on extra fingerprints
-    // so it's easier to type the commands when testing
-    if fingerprints.len() < peer_addrs.len() {
-        error!("[-] Not enough fingerprints provided.");
-        return;
-    }
+    let myfingerprint = secret_key.public_key().fingerprint();
 
     info!("[+] Key loaded!");
-    info!(
-        "[+] Fingerprint: {0}",
-        hex::encode(secret_key.public_key().fingerprint())
-    );
-
-    // Only generate key
-    if generate {
-        return;
-    }
 
     // bind to the socket
-    let mut socket = match Socket::bind(([0, 0, 0, 0], bind_port.unwrap()).into(), secret_key).await
-    {
+    let socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), secret_key.clone()).await {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -184,58 +167,48 @@ async fn main() {
         }
     };
 
-    // add peers
-    let mut senders: Vec<mpsc::Sender<ProtocolPacket>> = Vec::new();
-    let mut receivers: Vec<mpsc::Receiver<ProtocolPacket>> = Vec::new();
+    let myid: String;
+    let myip: Option<Ipv4Addr>;
+    let myport: u16;
+    if let IpAddr::V4(ipv4) = socket.external.ip() {
+        myip = Some(ipv4);
+        myport = socket.external.port();
+        myid = lighthouse::register_endpoint(&lighthouse_url, myip, myport, secret_key.clone())
+            .await
+            .expect("failed to register endpoint");
 
-    for (i, peer_addr) in peer_addrs.iter().enumerate() {
-        let fingerprint = hex::decode(&fingerprints[i]).expect("Invalid fingerprint format");
-        let (app_outbound_tx, app_inbound_rx) =
-            socket.add_peer(*peer_addr, fingerprint, initiate).await;
-        senders.push(app_outbound_tx);
-        receivers.push(app_inbound_rx);
-    }
+        let myfingerprint_hex = hex::encode(myfingerprint.clone());
+        let info_str = lighthouse::encode_info_str(&myfingerprint_hex, &lighthouse_url, &myid);
 
-    info!("[+] Setup success");
-    info!("[*] Attempting transmission...");
-
-    // Wait 5 mins
-    let mut ready_peers: Vec<usize> = Vec::new();
-
-    let mut tick: u16 = 0;
-
-    while tick < 5 * 60 * 2 && ready_peers.len() != peer_addrs.len() {
-        for (i, _) in peer_addrs.iter().enumerate() {
-            if !ready_peers.contains(&i) {
-                match socket.get_peer_state(peer_addrs[i]).await {
-                    None => {}
-                    Some(s) => {
-                        if s == PeerState::Established {
-                            info!("[+] Connection with {0} succeeded!", peer_addrs[i]);
-                            ready_peers.push(i);
-                        }
-                    }
-                }
-            }
-        }
-        tick += 1;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    // check if the connection is ready
-    if ready_peers.len() != peer_addrs.len() {
-        error!("[-] Connection failure.");
+        info!("[+] Info string: {0}", info_str);
+    } else {
+        error!("[-] IPv6 not supported");
         return;
     }
 
-    info!("[+] All connections succeeded!");
-    info!("[+] Chat log follows below:");
+    // add peers
+    let senders: Arc<RwLock<Vec<mpsc::Sender<ProtocolPacket>>>> = Arc::new(RwLock::new(Vec::new()));
+    let receivers: Arc<RwLock<Vec<mpsc::Receiver<ProtocolPacket>>>> =
+        Arc::new(RwLock::new(Vec::new()));
+
+    let senders_1 = senders.clone();
+    let receivers_1 = receivers.clone();
+
+    let senders_2 = senders.clone();
+    let receivers_2 = receivers.clone();
+
+    let socket_locked = Arc::new(RwLock::new(socket));
+    let socket_locked_1 = socket_locked.clone();
+
+    info!("[+] Use /conn <info string> to connect to a new peer");
     info!("[+] Use /dr <username> to start a chat with user");
     info!("[+] Then use /msg <username> <message> to send a message");
+    info!("[+] Then use /msgimg <username> <image path> to send an image");
+    info!("[+] Chat log follows below:");
 
     tokio::task::spawn(async move {
         loop {
-            for app_inbound_rx in receivers.iter_mut() {
+            for app_inbound_rx in receivers.write().await.iter_mut() {
                 if let Ok(recv) = app_inbound_rx.try_recv() {
                     match recv.packet_type {
                         Some(ProtocolPacketType::PktMessage(m)) => {
@@ -250,6 +223,36 @@ async fn main() {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     });
+
+    tokio::task::spawn(async move {
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            let conns = lighthouse::list_conns(&lighthouse_url, myid.clone(), secret_key.clone())
+                .await
+                .expect("list conn failed");
+            for (conn, fingerprint) in conns.iter() {
+                if !seen.contains(conn) {
+                    info!("[*] New connection from {:?}", conn);
+                    let (app_outbound_tx, app_inbound_rx) = socket_locked
+                        .write()
+                        .await
+                        .add_peer(
+                            SocketAddr::from_str(conn).expect("bad conn"),
+                            hex::decode(fingerprint).expect("bad fingerprint"),
+                            false,
+                        )
+                        .await;
+                    {
+                        senders_1.write().await.push(app_outbound_tx);
+                        receivers_1.write().await.push(app_inbound_rx);
+                    }
+                    seen.push(conn.clone());
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    });
+
     loop {
         let mut input = String::new();
 
@@ -259,9 +262,18 @@ async fn main() {
                 trimmed = &trimmed[1..];
                 if let Some((prefix, rest)) = trimmed.split_once(' ') {
                     if prefix == "dr" {
-                        let _ = socket.start_dr(rest.to_string()).await;
+                        let _ = socket_locked_1
+                            .write()
+                            .await
+                            .start_dr(rest.to_string())
+                            .await;
+                        info!("[+] Done DR with {0}", rest.to_string());
                     } else if prefix == "cert" {
-                        let _ = socket.get_node_cert(rest.to_string()).await;
+                        let _ = socket_locked_1
+                            .write()
+                            .await
+                            .get_node_cert(rest.to_string())
+                            .await;
                     } else if prefix == "msg" {
                         if let Some((destination, message)) = rest.split_once(' ') {
                             let message = messages::v1::Message {
@@ -275,7 +287,9 @@ async fn main() {
                             let packet = ProtocolPacket {
                                 packet_type: Some(ProtocolPacketType::PktMessage(message)),
                             };
-                            let _ = socket
+                            let _ = socket_locked_1
+                                .write()
+                                .await
                                 .send_gossip_encrypted(packet, destination.to_string())
                                 .await;
                         }
@@ -296,11 +310,40 @@ async fn main() {
                                     let packet = ProtocolPacket {
                                         packet_type: Some(ProtocolPacketType::PktMessage(message)),
                                     };
-                                    let _ = socket
+                                    let _ = socket_locked_1
+                                        .write()
+                                        .await
                                         .send_gossip_encrypted(packet, destination.to_string())
                                         .await;
                                 }
                             }
+                        }
+                    } else if prefix == "conn" {
+                        let (fingerprint, target_lh_url, id) =
+                            lighthouse::decode_info_str(&rest.to_string())
+                                .expect("bad info string");
+                        let target = lighthouse::lookup_endpoint(
+                            &target_lh_url,
+                            id,
+                            myip,
+                            myport,
+                            &myfingerprint,
+                        )
+                        .await
+                        .expect("failed to lookup endpoint");
+                        let (app_outbound_tx, app_inbound_rx) = socket_locked_1
+                            .write()
+                            .await
+                            .add_peer(
+                                SocketAddr::from_str(&target).expect("bad target"),
+                                hex::decode(fingerprint).expect("bad fingerprint"),
+                                true,
+                            )
+                            .await;
+                        info!("[+] Sent request to {:?}", target);
+                        {
+                            senders_2.write().await.push(app_outbound_tx);
+                            receivers_2.write().await.push(app_inbound_rx);
                         }
                     }
                 }
