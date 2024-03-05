@@ -2,18 +2,32 @@ use std::path::Path;
 
 use string_comm::Socket;
 use thiserror::Error;
+use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
-use crate::settings::{self, SettingsContext};
+use crate::{
+    account::AccountContext,
+    settings::{self, SettingsContext},
+};
 
 /// The context type for the router.
 pub struct Context {
     /// The communication socket.
-    pub socket: Socket,
+    pub socket: RwLock<StatefulSocket>,
     /// The Prisma client for the cache.
     pub cache: cache_prisma::PrismaClient,
     /// The settings for the application.
     pub settings_ctx: settings::SettingsContext,
+    /// The account context.
+    pub account_ctx: AccountContext,
+}
+
+/// Wrapper type for the socket to account for pre-login users.
+pub enum StatefulSocket {
+    /// The socket is active.
+    Active(Socket),
+    /// The socket is inactive.
+    Inactive,
 }
 
 /// An enum of errors that can occur when working with the context.
@@ -27,7 +41,7 @@ pub enum ContextError {
 
 impl Context {
     /// Create a new context with the given socket.
-    pub async fn from<P: AsRef<Path>>(socket: Socket, data_dir: P) -> Result<Self, ContextError> {
+    pub async fn new<P: AsRef<Path>>(data_dir: P) -> Result<Self, ContextError> {
         info!("- Data directory: {:?}", data_dir.as_ref());
 
         // create sqlite path
@@ -38,7 +52,9 @@ impl Context {
                 .join("cache.sqlite")
                 .to_str()
                 .expect("invalid path")
-        ).replace("\\", "/");
+        )
+        .replace('\\', "/");
+
         info!("- SQLite path: {:?}", sqlite_path);
 
         // create settings path
@@ -46,9 +62,10 @@ impl Context {
         info!("- Settings path: {:?}", settings_path);
 
         Ok(Self {
-            socket,
+            socket: StatefulSocket::Inactive.into(),
             cache: cache_prisma::new_client_with_url(&sqlite_path).await?,
-            settings_ctx: SettingsContext::from_path(settings_path).await?,
+            account_ctx: AccountContext::from_data_dir(&data_dir),
+            settings_ctx: SettingsContext::from_data_dir(&data_dir).await?,
         })
     }
 }

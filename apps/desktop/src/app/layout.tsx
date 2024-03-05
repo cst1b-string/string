@@ -1,6 +1,6 @@
 "use client";
 
-import { IntegrationProvider } from "@/integration";
+import { IntegrationProvider, useRspc } from "@/integration";
 import { Inter } from "next/font/google";
 import { createContext, useState } from "react";
 

@@ -11,6 +11,7 @@ pub fn attach_channel_queries<TMeta: Send>(
         .query("channel.list", |t| t(list_channels))
         .query("channel.messages", |t| t(get_channel_messages))
         .mutation("channel.create", |t| t(create_channel))
+        .mutation("channel.send", |t| t(send_message))
 }
 
 /// Fetch a list of channels from the cache.
@@ -76,4 +77,51 @@ pub async fn create_channel(
                 err,
             )
         })
+}
+
+/// Send a message to the network.
+#[derive(Debug, Type, Deserialize)]
+pub struct SendMessageArgs {
+    channel_id: i32,
+    content: String,
+}
+
+/// Send a message to the network.
+async fn send_message(ctx: Ctx, args: SendMessageArgs) -> Result<(), rspc::Error> {
+    let fingerprint = {
+        let fingerprint = ctx.account_ctx.fingerprint.read().await;
+        match fingerprint.as_ref() {
+            None => {
+                return Err(rspc::Error::new(
+                    ErrorCode::Unauthorized,
+                    "not logged in".to_string(),
+                ));
+            }
+            Some(fingerprint) => fingerprint,
+        }
+        .clone()
+    };
+
+    // TODO: send on socket
+    let socket = ctx.socket.read().await;
+
+    // push message to cache - maybe wait for response from socket?
+    ctx.cache
+        .message()
+        .create(
+            args.content,
+            cache_prisma::user::id::equals(fingerprint.clone()),
+            cache_prisma::channel::id::equals(args.channel_id),
+            vec![],
+        )
+        .exec()
+        .await
+        .map_err(|err| {
+            rspc::Error::with_cause(
+                ErrorCode::InternalServerError,
+                "failed to send message".into(),
+                err,
+            )
+        })?;
+    Ok(())
 }
