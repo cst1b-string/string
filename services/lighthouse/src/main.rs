@@ -66,7 +66,7 @@ impl IntoResponse for LighthouseError {
 
 /// Defines the context for requests.
 struct LighthouseCtx {
-    db: Arc<RwLock<PrismaClient>>,
+    db: RwLock<PrismaClient>,
 }
 
 /// The payload for the `report_status` endpoint. Contains the version of the service.
@@ -114,17 +114,17 @@ fn verify_data(
     let now: u32 = chrono::Utc::now().timestamp() as u32;
 
     if timestamp < now - 30 || timestamp > now + 30 {
-        return Err(LighthouseError::SigError);
+        return Err(LighthouseError::SignatureError);
     }
 
     let (pubkey, _headers) = SignedPublicKey::from_string(pubkey_str)?;
 
-    let signature = hex::decode(signature_str).map_err(|_| LighthouseError::SigError)?;
+    let signature = hex::decode(signature_str).map_err(|_| LighthouseError::SignatureError)?;
 
     let data = format!("{}-{}", input, timestamp);
 
     Crypto::verify_data_static(&pubkey, &signature, data.as_bytes())
-        .map_err(|_| LighthouseError::SigError)?;
+        .map_err(|_| LighthouseError::SignatureError)?;
 
     Ok(())
 }
@@ -239,7 +239,7 @@ async fn lookup_endpoint(
         )])
         .exec()
         .await?
-        .ok_or(LighthouseError::InvalidID)?;
+        .ok_or(LighthouseError::InvalidId)?;
 
     db.pending_connection()
         .create(
@@ -273,7 +273,7 @@ async fn list_conns(
         )])
         .exec()
         .await?
-        .ok_or(LighthouseError::InvalidID)?
+        .ok_or(LighthouseError::InvalidId)?
         .pubkey;
 
     verify_data(
@@ -324,13 +324,13 @@ async fn handle_error(error: BoxError) -> impl IntoResponse {
     )
 }
 
-fn start_db_cleanup_worker(db_lock: Arc<RwLock<PrismaClient>>) {
+fn start_db_cleanup_worker(ctx: Arc<LighthouseCtx>) {
     tokio::task::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(10 * 60)).await;
-            let db = db_lock.write().await;
+            let ctx = ctx.db.write().await;
             // TODO: flush old entries
-            drop(db);
+            drop(ctx);
         }
     });
 }
@@ -345,11 +345,9 @@ async fn main() {
         .await
         .expect("failed to create database client");
 
-    // create context
-    let prisma_locked = Arc::new(RwLock::new(prisma));
-    let ctx = LighthouseCtx {
-        db: prisma_locked.clone(),
-    };
+    let ctx = LighthouseCtx { db: prisma.into() };
+
+    let arc_ctx = Arc::new(ctx);
 
     // create app router
     let app = Router::new()
@@ -365,7 +363,7 @@ async fn main() {
                 .concurrency_limit(1024)
                 .timeout(Duration::from_secs(10))
                 .layer(TraceLayer::new_for_http())
-                .layer(AddExtensionLayer::new(Arc::new(ctx)))
+                .layer(AddExtensionLayer::new(arc_ctx.clone()))
                 .into_inner(),
         );
 
@@ -374,7 +372,7 @@ async fn main() {
         .await
         .expect("failed to bind listener");
 
-    start_db_cleanup_worker(prisma_locked);
+    start_db_cleanup_worker(arc_ctx);
 
     axum::serve(
         listener,
