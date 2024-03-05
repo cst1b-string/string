@@ -14,10 +14,12 @@ use serde::Deserialize;
 use smallvec::smallvec;
 use string_comm::Socket;
 use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::{context::StatefulSocket, Ctx};
 
 /// The account context.
+#[derive(Debug)]
 pub struct AccountContext {
     /// The directory where the keys are stored.
     pub key_dir: PathBuf,
@@ -48,18 +50,22 @@ pub fn attach_account_queries<TMeta: Send>(
 struct LoginArgs;
 
 /// Test if the user has a private key.
-async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<bool, rspc::Error> {
+#[tracing::instrument]
+async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<(), rspc::Error> {
     // find keys in key dir, abort if missing
     let key_path = ctx.account_ctx.key_dir.join("private.key");
     if !key_path.exists() {
-        return Ok(false);
+        return Err(rspc::Error::new(
+            rspc::ErrorCode::NotFound,
+            "No private key found".to_string(),
+        ));
     }
 
     // open file
     let mut key_file = File::open(key_path).map_err(|e| {
         rspc::Error::with_cause(
             rspc::ErrorCode::InternalServerError,
-            "missing".to_string(),
+            "Cannot access key file".to_string(),
             e,
         )
     })?;
@@ -68,7 +74,7 @@ async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<bool, rspc::Error> {
     let (secret_key, _) = SignedSecretKey::from_armor_single(&mut key_file).map_err(|err| {
         rspc::Error::with_cause(
             rspc::ErrorCode::InternalServerError,
-            "failed to read key".to_string(),
+            "Failed to read key file".to_string(),
             err,
         )
     })?;
@@ -76,7 +82,10 @@ async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<bool, rspc::Error> {
     // check if socket is active
     let mut socket = ctx.socket.write().await;
     if matches!(*socket, StatefulSocket::Active(_)) {
-        return Ok(true);
+        return Err(rspc::Error::new(
+            rspc::ErrorCode::Conflict,
+            "Socket already active".to_string(),
+        ));
     }
 
     // store user fingerprint
@@ -96,7 +105,7 @@ async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<bool, rspc::Error> {
             })?,
     );
 
-    Ok(false)
+    Ok(())
 }
 
 #[derive(Debug, Type, Deserialize)]
@@ -108,10 +117,20 @@ struct CreateAccountArgs {
 }
 
 /// Test if the user has a private key.
-async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<bool, rspc::Error> {
-    let key_path = ctx.account_ctx.key_dir.join("private.key");
-    if !key_path.exists() {
-        return Ok(false);
+#[tracing::instrument]
+async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::Error> {
+    info!("Creating user account...");
+
+    // check for existing key
+    let key_path = ctx
+        .account_ctx
+        .key_dir
+        .join(format!("{}.asc", args.username));
+    if key_path.exists() {
+        return Err(rspc::Error::new(
+            rspc::ErrorCode::Conflict,
+            "Local user already exists".to_string(),
+        ));
     }
 
     let mut key_params = SecretKeyParamsBuilder::default();
@@ -144,12 +163,21 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<bool, rspc:
             .expect("Error generating armored string")
             .as_bytes(),
     )
-    .expect("Error writing privkey");
+    .map_err(|e| {
+        rspc::Error::with_cause(
+            rspc::ErrorCode::InternalServerError,
+            "Error writing key to file".to_string(),
+            e,
+        )
+    })?;
 
     // check if socket is active - technically code dupe but shhhh
     let mut socket = ctx.socket.write().await;
     if matches!(*socket, StatefulSocket::Active(_)) {
-        return Ok(true);
+        return Err(rspc::Error::new(
+            rspc::ErrorCode::Conflict,
+            "Socket already active".to_string(),
+        ));
     }
 
     // store user fingerprint
@@ -169,5 +197,5 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<bool, rspc:
             })?,
     );
 
-    Ok(false)
+    Ok(())
 }
