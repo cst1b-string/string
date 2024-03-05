@@ -11,6 +11,7 @@ use crate::{
 };
 
 /// The context type for the router.
+#[derive(Debug)]
 pub struct Context {
     /// The communication socket.
     pub socket: RwLock<StatefulSocket>,
@@ -23,6 +24,7 @@ pub struct Context {
 }
 
 /// Wrapper type for the socket to account for pre-login users.
+#[derive(Debug)]
 pub enum StatefulSocket {
     /// The socket is active.
     Active(Socket),

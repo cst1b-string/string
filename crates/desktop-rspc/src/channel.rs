@@ -1,7 +1,7 @@
 use rspc::{ErrorCode, RouterBuilder, Type};
 use serde::Deserialize;
 
-use crate::Ctx;
+use crate::{context::StatefulSocket, Ctx};
 
 /// Attach the channel cache queries to the router.
 pub fn attach_channel_queries<TMeta: Send>(
@@ -104,6 +104,15 @@ async fn send_message(ctx: Ctx, args: SendMessageArgs) -> Result<(), rspc::Error
 
     // TODO: send on socket
     let socket = ctx.socket.read().await;
+    let socket = match *socket {
+        StatefulSocket::Active(ref socket) => socket,
+        StatefulSocket::Inactive => {
+            return Err(rspc::Error::new(
+                ErrorCode::Unauthorized,
+                "not logged in".to_string(),
+            ));
+        }
+    };
 
     // push message to cache - maybe wait for response from socket?
     ctx.cache

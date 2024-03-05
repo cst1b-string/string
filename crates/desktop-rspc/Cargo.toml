@@ -16,9 +16,10 @@ smallvec = "1"
 thiserror = "1.0"
 tracing = "0.1"
 
+cache-prisma = { path = "../cache-prisma" }
 string-comm = { path = "../comm" }
 string-protocol = { path = "../protocol" }
-cache-prisma = { path = "../cache-prisma" }
+lighthouse-client = { path = "../lighthouse-client" }
 
 [lib]
 name = "desktop_rspc"

@@ -25,6 +25,7 @@ pub struct Settings {
 }
 
 /// The context for the settings.
+#[derive(Debug)]
 pub struct SettingsContext {
     /// The underlying settings.
     pub settings: RwLock<Settings>,
