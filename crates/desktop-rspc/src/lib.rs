@@ -4,6 +4,7 @@ mod account;
 mod channel;
 mod context;
 mod event;
+mod lighthouse;
 mod settings;
 mod user;
 
