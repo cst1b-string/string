@@ -42,18 +42,24 @@ pub fn attach_account_queries<TMeta: Send>(
     builder: RouterBuilder<Ctx, TMeta>,
 ) -> RouterBuilder<Ctx, TMeta> {
     builder
+        .query("account.fingerprint", |t| t(get_fingerprint))
         .query("account.login", |t| t(login_account))
         .mutation("account.create", |t| t(create_account))
 }
 
 #[derive(Debug, Type, Deserialize)]
-struct LoginArgs;
+struct LoginArgs {
+    username: String,
+}
 
 /// Test if the user has a private key.
 #[tracing::instrument]
-async fn login_account(ctx: Ctx, _: LoginArgs) -> Result<(), rspc::Error> {
+async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
     // find keys in key dir, abort if missing
-    let key_path = ctx.account_ctx.key_dir.join("private.key");
+    let key_path = ctx
+        .account_ctx
+        .key_dir
+        .join(format!("{}.asc", args.username));
     if !key_path.exists() {
         return Err(rspc::Error::new(
             rspc::ErrorCode::NotFound,
@@ -198,4 +204,15 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
     );
 
     Ok(())
+}
+
+/// Get the fingerprint of the active user.
+async fn get_fingerprint(ctx: Ctx, _: ()) -> Result<String, rspc::Error> {
+    match *ctx.account_ctx.fingerprint.read().await {
+        Some(ref fingerprint) => Ok(format!("{:x?}", fingerprint)),
+        None => Err(rspc::Error::new(
+            rspc::ErrorCode::NotFound,
+            "No active user".to_string(),
+        )),
+    }
 }
