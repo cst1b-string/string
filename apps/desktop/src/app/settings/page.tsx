@@ -21,7 +21,7 @@ export default function Home() {
 	return (
 		<div className="flex flex-row justify-center py-5">
 			<div className="flex flex-col space-y-4 w-[600px]">
-				<div className="flex  justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
+				<div className="flex  justify-center dark:bg-[#335577] bg-[#90E0EF] dark:text-[white] text-[black] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
 					<button onClick={() => themeMutate(data === "Dark" ? "Light" : "Dark")}>
 						{lightModeText}
 					</button>
