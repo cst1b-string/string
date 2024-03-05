@@ -95,7 +95,7 @@ impl Socket {
         let external = google_stun
             .query_external_address_async(&raw_socket)
             .await
-            .map_err(|_| SocketError::STUNError)?;
+            .map_err(|_| SocketError::StunError)?;
 
         let socket: Arc<_> = raw_socket.into();
 

@@ -83,10 +83,11 @@ fn save_key(location: &String, key: SignedSecretKey) {
     .expect("Error writing privkey");
 }
 
-fn get_key_path() -> String {
+fn get_key_path(username: &String) -> String {
     let cwd = env::current_dir().expect("Failed to get current dir");
     let cwd_str = cwd.to_str().expect("Failed to convert dir to string");
-    format!("{cwd_str}/key.asc")
+    // Please don't put ../ or null bytes in the username :(
+    format!("{cwd_str}/{username}.asc")
 }
 
 fn construct_image(image_data: &Vec<u8>) -> messages::v1::MessageAttachment {
@@ -143,7 +144,7 @@ async fn main() {
         )
         .init();
 
-    let key_path = get_key_path();
+    let key_path = get_key_path(&username);
     let secret_key = match load_key(&key_path) {
         Some(secret) => secret,
         None => {

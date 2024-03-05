@@ -189,26 +189,26 @@ pub fn decode_info_str(
 ) -> Result<(String, String, String), LighthouseClientError> {
     let raw = BASE64_STANDARD.decode(info_str)?;
     let res: serde_json::Value =
-        serde_json::from_str(from_utf8(&raw).map_err(|_| LighthouseClientError::InfostrError)?)
-            .map_err(|_| LighthouseClientError::InfostrError)?;
+        serde_json::from_str(from_utf8(&raw).map_err(|_| LighthouseClientError::InfoStringError)?)
+            .map_err(|_| LighthouseClientError::InfoStringError)?;
 
     let fingerprint = res
         .get("f")
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .as_str()
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .to_string();
     let id = res
         .get("i")
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .as_str()
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .to_string();
     let lighthouse = res
         .get("l")
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .as_str()
-        .ok_or(LighthouseClientError::InfostrError)?
+        .ok_or(LighthouseClientError::InfoStringError)?
         .to_string();
     Ok((fingerprint, lighthouse, id))
 }
