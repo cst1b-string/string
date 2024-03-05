@@ -126,7 +126,7 @@ fn verify_data(
     Crypto::verify_data_static(&pubkey, &signature, data.as_bytes())
         .map_err(|_| LighthouseError::SignatureError)?;
 
-    Ok(())
+    Ok(())``
 }
 
 #[derive(Deserialize)]
