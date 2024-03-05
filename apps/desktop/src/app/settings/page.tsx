@@ -13,7 +13,7 @@ export default function Home() {
 		refetch();
 	}, [themeIsSuccess]); //Refetch on successful backend call
 
-	const lightModeText = useMemo(() => (data === "Dark" ? "Dark Mode" : "Light Mode"), [data]); //Text to be displayed on theme button
+	const lightModeText = useMemo(() => (data === "Light" ? "Dark Mode" : "Light Mode"), [data]); //Text to be displayed on theme button
 
 	const [username, setUsername] = useState("<Username from Tauri>");
 	const [bio, setBio] = useState("<Bio from Tauri>");
