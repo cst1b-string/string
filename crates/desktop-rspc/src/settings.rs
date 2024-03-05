@@ -48,13 +48,17 @@ impl SettingsContext {
 
         // check if file exists, otherwise copy defaults
         if !settings_path.exists() {
+            tokio::fs::create_dir_all(path).await?;
+            let file = tokio::fs::File::create(&settings_path).await?;
             let settings = Settings::default();
-            let file = std::fs::File::create(path)?;
-            serde_json::to_writer(file, &settings)?;
+            serde_json::to_writer(
+                file.try_into_std().expect("failed to downcast tokio File"),
+                &settings,
+            )?;
         }
 
         // read from file
-        let content = tokio::fs::read_to_string(settings_path).await?;
+        let content = tokio::fs::read_to_string(&settings_path).await?;
         let settings = serde_json::from_str(&content)?;
 
         Ok(Self::from_settings(settings))
