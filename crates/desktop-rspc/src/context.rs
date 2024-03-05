@@ -2,7 +2,7 @@ use std::path::Path;
 
 use string_comm::Socket;
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::{

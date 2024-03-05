@@ -222,7 +222,7 @@ async fn list_potential_peers(
     // verify the payload
     payload.verify()?;
 
-    let conns = db
+    let addrs = db
         .pending_connection()
         .find_many(vec![
             lighthouse_prisma::pending_connection::endpoint_id::equals(payload.fingerprint.clone()),
@@ -231,12 +231,15 @@ async fn list_potential_peers(
         .await?;
 
     Ok(Json(ListPotentialPeersResponse {
-        conns: conns
+        addrs: addrs
             .iter()
-            .map(|rec| {
+            .map(|entry| {
                 (
-                    format!("{}:{}", rec.ip, rec.port),
-                    hex::encode(rec.fingerprint.clone()),
+                    hex::encode(entry.fingerprint.clone()),
+                    SocketAddr::new(
+                        entry.ip.parse().expect("stored data was not an IP address"),
+                        entry.port as u16,
+                    ),
                 )
             })
             .collect(),

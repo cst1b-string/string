@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::Path};
+use std::{collections::HashMap, net::SocketAddr, path::Path};
 
 use pgp::SignedSecretKey;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ pub struct LighthouseContext {
 }
 
 impl LighthouseContext {
+    /// Create a new lighthouse context with the given data path.
     pub async fn from_data_dir<P: AsRef<Path>>(path: P) -> Result<Self, LighthouseError> {
         let path = path.as_ref().to_owned();
         let settings_path = path.join("lighthouse.json");
@@ -39,12 +40,15 @@ impl LighthouseContext {
 }
 
 impl LighthouseContext {
+    /// List potential peers.
     pub async fn list_potential_peers(
         &self,
         secret_key: SignedSecretKey,
-    ) -> Result<Vec<SocketAddr>, LighthouseError> {
+    ) -> Result<HashMap<String, SocketAddr>, LighthouseError> {
         let settings = self.settings.read().await;
-        lighthouse_client::list_potential_peers(&settings.endpoint, &secret_key).await
+        let results =
+            lighthouse_client::list_potential_peers(&settings.endpoint, &secret_key).await?;
+        Ok(results)
     }
 }
 

@@ -1,7 +1,7 @@
 //! This crate contains the protocol definitions for the Lighthouse network, and is usedf
 //! by both the client and the server.
 
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr};
 
 use nom::combinator::map;
 use pgp::{
@@ -122,5 +122,5 @@ impl Sign for ListPotentialPeersPayload {
 /// The response to a potential peer list request.
 #[derive(Serialize, Deserialize)]
 pub struct ListPotentialPeersResponse {
-    pub conns: Vec<(String, String)>,
+    pub addrs: HashMap<String, SocketAddr>,
 }

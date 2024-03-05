@@ -14,6 +14,7 @@ use pgp::{
 use serde::{Deserialize, Serialize};
 
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
     str::{from_utf8, FromStr},
 };
@@ -135,7 +136,7 @@ pub async fn get_node_address<F: AsRef<[u8]>>(
 pub async fn list_potential_peers(
     lighthouse_url: &String,
     secret_key: &SignedSecretKey,
-) -> Result<Vec<(String, String)>, LighthouseClientError> {
+) -> Result<HashMap<String, SocketAddr>, LighthouseClientError> {
     let timestamp: u32 = chrono::Utc::now().timestamp() as u32;
     let signature = hex::encode(Crypto::sign_data_static(
         &secret_key,
@@ -160,7 +161,7 @@ pub async fn list_potential_peers(
         .await?
         .json::<ListPotentialPeersResponse>()
         .await?
-        .conns)
+        .addrs)
 }
 
 /// A struct to hold encoded information.
