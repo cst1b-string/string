@@ -99,6 +99,7 @@ async fn get_settings_theme(ctx: Ctx, _: ()) -> Result<Theme, rspc::Error> {
 
 /// Update the theme to the settings.
 async fn update_settings_theme(ctx: Ctx, theme: Theme) -> Result<(), rspc::Error> {
+    println!("update theme to {:?}", theme);
     ctx.settings_ctx.settings.write().await.theme = theme;
     Ok(())
 }

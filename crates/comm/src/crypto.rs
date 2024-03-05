@@ -205,24 +205,7 @@ impl Crypto {
 
     pub fn sign_data(&self, bytes: &Vec<u8>) -> Result<Vec<u8>, SigningError> {
         // So apparently the official RFC calls for more stuff but this works
-        let digest = {
-            let mut hasher = Sha256::new();
-            hasher.update(bytes);
-            hasher.finalize()
-        };
-        let digest = digest.as_slice();
-
-        let signature = self.secret_key.create_signature(
-            || "testpassword".to_string(),
-            HashAlgorithm::SHA2_256,
-            digest,
-        )?;
-
-        let mut allbytes: Vec<Vec<u8>> = Vec::new();
-        for mpi in signature {
-            allbytes.push(mpi.to_bytes()?);
-        }
-        Ok(allbytes.concat())
+        Crypto::sign_data_static(&self.secret_key, bytes)
     }
 
     pub fn verify_data(
@@ -242,6 +225,39 @@ impl Crypto {
             }
         };
 
+        Crypto::verify_data_static(signed_pub_key, signature, bytes)
+    }
+
+    pub fn sign_data_static(
+        secret_key: &SignedSecretKey,
+        bytes: &Vec<u8>,
+    ) -> Result<Vec<u8>, SigningError> {
+        // So apparently the official RFC calls for more stuff but this works
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher.finalize()
+        };
+        let digest = digest.as_slice();
+
+        let signature = secret_key.create_signature(
+            || "testpassword".to_string(),
+            HashAlgorithm::SHA2_256,
+            digest,
+        )?;
+
+        let mut allbytes: Vec<Vec<u8>> = Vec::new();
+        for mpi in signature {
+            allbytes.push(mpi.to_bytes()?);
+        }
+        Ok(allbytes.concat())
+    }
+
+    pub fn verify_data_static(
+        pubkey: &SignedPublicKey,
+        signature: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), SigningError> {
         let digest = {
             let mut hasher = Sha256::new();
             hasher.update(bytes);
@@ -252,7 +268,7 @@ impl Crypto {
         let (_unused, mpi_sig) =
             map(mpi, |v| vec![v.to_owned()])(signature).map_err(|_| SigningError::MpiFail)?;
 
-        signed_pub_key.verify_signature(HashAlgorithm::SHA2_256, digest, &mpi_sig)?;
+        pubkey.verify_signature(HashAlgorithm::SHA2_256, digest, &mpi_sig)?;
         debug!("signature verified");
         Ok(())
     }
