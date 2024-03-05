@@ -39,8 +39,32 @@ export default function SignUp() {
 						<br />
 						<input required type="text" className="py-1 px-1 rounded bg-[#335577] w-full" />
 					</label>
+					<label>
+						Password
+						<br />
+						<input
+							required
+							type="password"
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							className="py-1 px-1 rounded bg-[#335577] w-full"
+						/>
+					</label>
+					<label>
+						Confirm Password
+						<br />
+						<input
+							required
+							type="password"
+							value={confirmPassword}
+							onChange={(e) => setConfirmPassword(e.target.value)}
+							className="py-1 px-1 rounded bg-[#335577] w-full"
+						/>
+					</label>
+					{!passwordsMatch && <p className="text-red-500">Passwords do not match</p>}
 					<button
 						type="submit"
+						disabled={!passwordsMatch}
 						className="py-2 hover:bg-[#224466] rounded drop-shadow-lg bg-[#335577] text-white"
 					>
 						Create Account
