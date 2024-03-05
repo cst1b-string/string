@@ -15,7 +15,7 @@ const config: Config = {
 				darkGrey: "#16181b",
 				discordGreen: "#23a559",
 				navbarGrey: "#202327",
-				darkNavbar: "#001523",
+				darkNavbar: "#002266",
 				darkForm: "#0096C7",
 				darkInput: "#1e306b",
 				darkSelected: "#555E9F",
