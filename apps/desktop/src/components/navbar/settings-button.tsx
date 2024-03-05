@@ -1,9 +1,11 @@
+import { useRspc } from "@/integration";
 import Image from "next/image";
 import Link from "next/link";
 
-var hasAccount = true;
-
 export const SettingsButton = () => {
+	const rspc = useRspc();
+	const hasAccount = rspc.useQuery(["account.login", null]).data;
+
 	if (!hasAccount) {
 		return null;
 	}

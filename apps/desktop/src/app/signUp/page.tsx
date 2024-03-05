@@ -8,18 +8,40 @@ export default function SignUp() {
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [passwordsMatch, setPasswordsMatch] = useState(true);
-	const hasAccount = true; // temporary, will be replaced with a backend check if the user has an account
+	const [isLoading, setIsLoading] = useState(false);
 
 	const rspc = useRspc();
+	const createAccount = rspc.useMutation("account.create");
+	const { data: hasAccount } = rspc.useQuery(["account.login", null]);
 
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
+		setIsLoading(true);
 		setPasswordsMatch(password === confirmPassword);
 
 		if (passwordsMatch) {
 			// will become a mutation to create a new account
+			createAccount.mutate(
+				{ username: "username", passphrase: password },
+				{
+					onSuccess: (loginSuccess) => {
+						console.log(loginSuccess);
+						setIsLoading(false);
+						console.log("redirecting");
+						redirect("/");
+					},
+				}
+			);
 		}
 	};
+
+	if (isLoading) {
+		return (
+			<div className="h-screen w-screen flex justify-center items-center">
+				<div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white"></div>
+			</div>
+		);
+	}
 
 	if (hasAccount) {
 		redirect("/");
