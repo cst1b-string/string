@@ -58,16 +58,15 @@ pub async fn get_channel_messages(
 #[derive(Debug, Type, Deserialize)]
 pub struct CreateChannelArgs {
     title: String,
-    network_id: i32,
 }
 
 pub async fn create_channel(
     ctx: Ctx,
-    CreateChannelArgs { title, network_id }: CreateChannelArgs,
+    CreateChannelArgs { title }: CreateChannelArgs,
 ) -> Result<cache_prisma::channel::Data, rspc::Error> {
     ctx.cache
         .channel()
-        .create(title, cache_prisma::network::id::equals(network_id), vec![])
+        .create(title, vec![])
         .exec()
         .await
         .map_err(|err| {
