@@ -126,11 +126,15 @@ impl Context {
             .expect("failed to push to database - fuck");
 
         // setup own user if it doesnt exist
-        self.cache.user().upsert(
-            cache_prisma::user::id::equals(secret_key.public_key().fingerprint()),
-            cache_prisma::user::create(secret_key.public_key().fingerprint(), username, vec![]),
-            vec![],
-        );
+        self.cache
+            .user()
+            .upsert(
+                cache_prisma::user::id::equals(secret_key.public_key().fingerprint()),
+                cache_prisma::user::create(secret_key.public_key().fingerprint(), username, vec![]),
+                vec![],
+            )
+            .exec()
+            .await?;
 
         // create new socket
         debug!("Creating new socket... binding to 0.0.0.0:{}", DEFAULT_PORT);
