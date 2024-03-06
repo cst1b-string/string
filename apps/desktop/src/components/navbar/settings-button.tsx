@@ -4,11 +4,11 @@ import Link from "next/link";
 
 export const SettingsButton = () => {
 	const rspc = useRspc();
-	const hasAccount = rspc.useQuery(["account.login", null]).data;
+	// const hasAccount = rspc.useQuery(["account.login", null]).data;
 
-	if (!hasAccount) {
-		return null;
-	}
+	// if (!hasAccount) {
+	// 	return null;
+	// }
 	return (
 		<Link href="/settings">
 			<Image src="/settings-gear.png" alt="Settings" width={40} height={30} />

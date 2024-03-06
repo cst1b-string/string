@@ -2,9 +2,10 @@
 
 import ChatLog from "@/components/chatLog";
 import ChatSidebar from "@/components/chatSidebar";
-import { useRspc } from "@/integration";
 import { redirect } from "next/navigation";
-import { createContext, useState } from "react";
+import { createContext, useContext, useState } from "react";
+
+import { LoginContext } from "./loginContext";
 
 export const themeContext = createContext({
 	lightMode: false,
@@ -13,12 +14,11 @@ export const themeContext = createContext({
 
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
-	const rspc = useRspc();
-	const hasAccount = rspc.useQuery(["account.login", null]).data;
+	const { isLoggedIn } = useContext(LoginContext);
 
-	if (!hasAccount) {
+	if (!isLoggedIn) {
 		console.log("in main page");
-		redirect("/signUp");
+		redirect("/signIn");
 	}
 
 	const [lightMode, setLightMode] = useState(false);

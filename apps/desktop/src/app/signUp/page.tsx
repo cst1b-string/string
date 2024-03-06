@@ -12,7 +12,6 @@ export default function SignUp() {
 
 	const rspc = useRspc();
 	const createAccount = rspc.useMutation("account.create");
-	const { data: hasAccount } = rspc.useQuery(["account.login", null]);
 
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
@@ -20,7 +19,6 @@ export default function SignUp() {
 		setPasswordsMatch(password === confirmPassword);
 
 		if (passwordsMatch) {
-			// will become a mutation to create a new account
 			createAccount.mutate(
 				{ username: "username", passphrase: password },
 				{
@@ -28,7 +26,7 @@ export default function SignUp() {
 						console.log(loginSuccess);
 						setIsLoading(false);
 						console.log("redirecting");
-						redirect("/");
+						redirect("/signIn");
 					},
 				}
 			);
@@ -41,10 +39,6 @@ export default function SignUp() {
 				<div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white"></div>
 			</div>
 		);
-	}
-
-	if (hasAccount) {
-		redirect("/");
 	}
 
 	return (
