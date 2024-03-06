@@ -39,7 +39,8 @@ export default function ChatSidebar({
 	useEffect(() => {
 		console.log("data: ", data);
 		if (data && data.length > 0 && selectedChannel < 0) {
-			setSelectedChannel(data[0]!.id as number);
+			console.log(data);
+			setSelectedChannel(data[0]!.id);
 		}
 	}, []);
 
