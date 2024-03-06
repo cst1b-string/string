@@ -33,7 +33,7 @@ export default function Home() {
 		console.log("pressed something");
 		if (inputValue.length > 0 && event.key == "Enter") {
 			sendMsg.mutate({ channel_id: selectedChannel, content: inputValue });
-			console.log("pressed enter");
+			console.log("channelid: ", selectedChannel);
 		}
 	};
 

@@ -6,7 +6,7 @@ import React from "react";
 export default function ChatLog({ selectedChannel }: { selectedChannel: number }) {
 	const rspc = useRspc();
 
-	const messages = rspc.useQuery(["channel.messages", selectedChannel]).data ?? [];
+	const { data } = rspc.useQuery(["channel.messages", selectedChannel], { refetchInterval: 1000 });
 
 	return (
 		<div
@@ -19,7 +19,7 @@ export default function ChatLog({ selectedChannel }: { selectedChannel: number }
 		>
 			<div className="relative w-full">
 				<div className="absolute top-0 left-0 w-full">
-					{messages.map((row, index) => (
+					{data?.map((row, index) => (
 						<div
 							key={index}
 							style={{ backgroundColor: index % 2 ? "#2a2a54" : "#212141" }}
