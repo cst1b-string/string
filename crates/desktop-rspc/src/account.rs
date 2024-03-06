@@ -84,21 +84,23 @@ async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
         )
     })?;
 
-    ctx.setup_socket(secret_key).await.map_err(|err| {
-        rspc::Error::with_cause(
-            rspc::ErrorCode::InternalServerError,
-            match &err {
-                ContextError::NewClientError(_) => "failed to create prisma client",
-                ContextError::SettingsContextError(_) => "failed to initialise settings",
-                ContextError::LighthouseContextError(_) => "failed to initialise lighthouse",
-                ContextError::PrismaError(_) => "encountered prisma query error",
-                ContextError::SocketActive => "socket already active",
-                ContextError::SocketError(_) => "error setting up socket",
-            }
-            .to_string(),
-            err,
-        )
-    })?;
+    ctx.setup_socket(args.username, secret_key)
+        .await
+        .map_err(|err| {
+            rspc::Error::with_cause(
+                rspc::ErrorCode::InternalServerError,
+                match &err {
+                    ContextError::NewClientError(_) => "failed to create prisma client",
+                    ContextError::SettingsContextError(_) => "failed to initialise settings",
+                    ContextError::LighthouseContextError(_) => "failed to initialise lighthouse",
+                    ContextError::PrismaError(_) => "encountered prisma query error",
+                    ContextError::SocketActive => "socket already active",
+                    ContextError::SocketError(_) => "error setting up socket",
+                }
+                .to_string(),
+                err,
+            )
+        })?;
 
     Ok(())
 }
@@ -133,7 +135,7 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
         .key_type(KeyType::Rsa(2048))
         .can_certify(false)
         .can_sign(true)
-        .primary_user_id(args.username)
+        .primary_user_id(args.username.clone())
         .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256])
         .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_256])
         .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB]);
@@ -166,13 +168,15 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
         )
     })?;
 
-    ctx.setup_socket(secret_key).await.map_err(|err| {
-        rspc::Error::with_cause(
-            rspc::ErrorCode::InternalServerError,
-            "failed to set up socket".to_string(),
-            err,
-        )
-    })?;
+    ctx.setup_socket(args.username, secret_key)
+        .await
+        .map_err(|err| {
+            rspc::Error::with_cause(
+                rspc::ErrorCode::InternalServerError,
+                "failed to set up socket".to_string(),
+                err,
+            )
+        })?;
 
     Ok(())
 }

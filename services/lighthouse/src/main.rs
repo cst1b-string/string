@@ -120,13 +120,6 @@ async fn register_node_addr(
     // verify the payload
     payload.verify()?;
 
-    // verify_data(
-    //     &payload.public_key,
-    //     &payload.signature,
-    //     &payload.addr,
-    //     payload.timestamp,
-    // )?;
-
     let existing_rec = db
         .endpoint()
         .find_first(vec![
@@ -136,7 +129,7 @@ async fn register_node_addr(
         .exec()
         .await?;
 
-    if matches!(existing_rec, Some(_)) {
+    if existing_rec.is_some() {
         return Ok(Json(RegisterNodeAddrResponse {}).into_response());
     }
 
