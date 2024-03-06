@@ -2,10 +2,12 @@ use std::{collections::HashMap, net::SocketAddr, path::Path};
 
 use pgp::SignedSecretKey;
 use serde::{Deserialize, Serialize};
+use string_comm::DEFAULT_PORT;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::info;
 
+#[derive(Debug)]
 pub struct LighthouseContext {
     settings: RwLock<LighthouseSettings>,
 }
@@ -48,6 +50,21 @@ impl LighthouseContext {
         let settings = self.settings.read().await;
         let results =
             lighthouse_client::list_potential_peers(&settings.endpoint, &secret_key).await?;
+        Ok(results)
+    }
+
+    pub async fn get_node_address<F: AsRef<[u8]>>(
+        &self,
+        fingerprint: F,
+    ) -> Result<SocketAddr, LighthouseError> {
+        let settings = self.settings.read().await;
+        let results = lighthouse_client::get_node_address(
+            &settings.endpoint,
+            None,
+            DEFAULT_PORT,
+            fingerprint,
+        )
+        .await?;
         Ok(results)
     }
 }

@@ -43,9 +43,8 @@ model User {
 }
 
 model Peer {
-    id       Int      @id @default(autoincrement())
-    user     User     @relation(fields: [userId], references: [id])
-    userId   Bytes    @unique
+    id       Bytes    @id
+    user     User     @relation(fields: [id], references: [id])
     address  String
     port     Int
     lastSeen DateTime
