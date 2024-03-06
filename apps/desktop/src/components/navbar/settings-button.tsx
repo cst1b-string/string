@@ -1,10 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
+import { useContext } from "react";
 
-var hasAccount = true;
+import { LoginContext } from "../contexts/loginContext";
 
 export const SettingsButton = () => {
-	if (!hasAccount) {
+	const { isLoggedIn } = useContext(LoginContext);
+
+	if (!isLoggedIn) {
 		return null;
 	}
 	return (

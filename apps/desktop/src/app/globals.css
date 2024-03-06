@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-	--background-hex: #f5f5f5;
+	--background-hex: #1e306b;
 }
 
 @media (prefers-color-scheme: dark) {
