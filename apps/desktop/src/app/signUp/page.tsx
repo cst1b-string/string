@@ -28,7 +28,7 @@ export default function SignUp() {
 						console.log(loginSuccess);
 						setIsLoading(false);
 						console.log("redirecting");
-						router.push("/signIn");
+						router.push("/");
 					},
 				}
 			);
