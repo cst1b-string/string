@@ -1,28 +1,45 @@
 "use client";
 
 import { useRspc } from "@/integration";
-import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function SignUp() {
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [passwordsMatch, setPasswordsMatch] = useState(true);
-	const hasAccount = true; // temporary, will be replaced with a backend check if the user has an account
+	const [isLoading, setIsLoading] = useState(false);
 
 	const rspc = useRspc();
+	const createAccount = rspc.useMutation("account.create");
+	const router = useRouter();
 
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
+		setIsLoading(true);
 		setPasswordsMatch(password === confirmPassword);
 
 		if (passwordsMatch) {
-			// will become a mutation to create a new account
+			createAccount.mutate(
+				{ username: "username", passphrase: password },
+				{
+					onSuccess: (loginSuccess) => {
+						console.log(loginSuccess);
+						setIsLoading(false);
+						console.log("redirecting");
+						router.push("/signIn");
+					},
+				}
+			);
 		}
 	};
 
-	if (hasAccount) {
-		redirect("/");
+	if (isLoading) {
+		return (
+			<div className="h-screen w-screen flex justify-center items-center">
+				<div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white"></div>
+			</div>
+		);
 	}
 
 	return (
@@ -39,8 +56,32 @@ export default function SignUp() {
 						<br />
 						<input required type="text" className="py-1 px-1 rounded bg-[#335577] w-full" />
 					</label>
+					<label>
+						Password
+						<br />
+						<input
+							required
+							type="password"
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							className="py-1 px-1 rounded bg-[#335577] w-full"
+						/>
+					</label>
+					<label>
+						Confirm Password
+						<br />
+						<input
+							required
+							type="password"
+							value={confirmPassword}
+							onChange={(e) => setConfirmPassword(e.target.value)}
+							className="py-1 px-1 rounded bg-[#335577] w-full"
+						/>
+					</label>
+					{!passwordsMatch && <p className="text-red-500">Passwords do not match</p>}
 					<button
 						type="submit"
+						disabled={!passwordsMatch}
 						className="py-2 hover:bg-[#224466] rounded drop-shadow-lg bg-[#335577] text-white"
 					>
 						Create Account

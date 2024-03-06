@@ -68,6 +68,7 @@ pub struct Gossip {
 
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
+#[derive(Debug)]
 pub struct Socket {
     /// The inner [UdpSocket] used for sending and receiving packets.
     pub inner: Arc<UdpSocket>,

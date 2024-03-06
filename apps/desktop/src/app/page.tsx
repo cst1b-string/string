@@ -1,25 +1,29 @@
 "use client";
 
+import ChatLog from "@/components/chatLog";
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
 import { useRspc } from "@/integration";
 import { redirect } from "next/navigation";
-import { createContext, useState } from "react";
+import { createContext, useContext, useState } from "react";
+
+import { LoginContext } from "./loginContext";
 
 export const themeContext = createContext({
 	lightMode: false,
 	setLightMode: (value: boolean) => {},
 });
 
-var hasAccount = true;
-
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
+	const { isLoggedIn } = useContext(LoginContext);
 	const [inputValue, setInputValue] = useState("");
 
-	if (!hasAccount) {
-		redirect("/signUp");
+	if (!isLoggedIn) {
+		console.log("in main page");
+		redirect("/signIn");
 	}
+
 	const [lightMode, setLightMode] = useState(false);
 	const rspc = useRspc();
 	const sendMsg = rspc.useMutation("channel.send");
