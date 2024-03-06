@@ -1,12 +1,12 @@
 "use client";
 
-import { IntegrationProvider, useRspc } from "@/integration";
+import { IntegrationProvider } from "@/integration";
 import { Inter } from "next/font/google";
 import { createContext, useState } from "react";
 
+import { LoginProvider } from "../components/contexts/loginContext";
 import { Navbar } from "../components/navbar";
 import "./globals.css";
-import { LoginProvider } from "./loginContext";
 
 const inter = Inter({ subsets: ["latin"] });
 

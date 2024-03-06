@@ -1,17 +1,18 @@
 "use client";
 
 import { useRspc } from "@/integration";
-import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function NewChat() {
 	const [channel_title, setChannelTitle] = useState("");
+	const rspc = useRspc();
+	const { mutate } = rspc.useMutation("channel.create");
+	const router = useRouter();
 
 	const handleCreateChannel = () => {
-		const rspc = useRspc();
-		const { mutate } = rspc.useMutation("channel.create");
 		mutate({ title: channel_title, network_id: 1 });
-		redirect(".");
+		router.push("/");
 	};
 
 	return (
@@ -30,12 +31,12 @@ export default function NewChat() {
 								required
 								maxLength={30}
 								type="text"
-								className="py-1 px-1 rounded bg-buttonBlue w-full"
+								className="py-1 px-1 rounded bg-darkInput w-full"
 							/>
 						</label>
 						<button
 							type="submit"
-							className="py-2 rounded drop-shadow-lg hover:bg-hoverBlue bg-buttonBlue text-white"
+							className="py-2 rounded drop-shadow-lg hover:bg-darkHover bg-darkInput text-white"
 						>
 							Create
 						</button>

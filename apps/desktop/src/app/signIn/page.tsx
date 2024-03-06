@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useContext, useEffect, useState } from "react";
 
-import { LoginContext } from "../loginContext";
+import { LoginContext } from "../../components/contexts/loginContext";
 
 export default function SignIn() {
 	const [username, setUsername] = useState("");

@@ -6,7 +6,7 @@ import { useRspc } from "@/integration";
 import { redirect } from "next/navigation";
 import { createContext, useContext, useState } from "react";
 
-import { LoginContext } from "./loginContext";
+import { LoginContext } from "../components/contexts/loginContext";
 
 export const themeContext = createContext({
 	lightMode: false,
