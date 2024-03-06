@@ -6,6 +6,7 @@ import { useState } from "react";
 
 export default function SignUp() {
 	const [password, setPassword] = useState("");
+	const [username, setUsername] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [passwordsMatch, setPasswordsMatch] = useState(true);
 	const [isLoading, setIsLoading] = useState(false);
@@ -21,7 +22,7 @@ export default function SignUp() {
 
 		if (passwordsMatch) {
 			createAccount.mutate(
-				{ username: "username", passphrase: password },
+				{ username: username, passphrase: password },
 				{
 					onSuccess: (loginSuccess) => {
 						console.log(loginSuccess);
@@ -54,7 +55,12 @@ export default function SignUp() {
 					<label>
 						Username
 						<br />
-						<input required type="text" className="py-1 px-1 rounded bg-[#335577] w-full" />
+						<input
+							required
+							onChange={(e) => setUsername(e.target.value)}
+							type="text"
+							className="py-1 px-1 rounded bg-[#335577] w-full"
+						/>
 					</label>
 					<label>
 						Password
