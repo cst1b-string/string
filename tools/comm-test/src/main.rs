@@ -131,9 +131,9 @@ async fn main() {
         username,
     } = Args::parse();
 
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info")
-    }
+    // if env::var("RUST_LOG").is_err() {
+    //     env::set_var("RUST_LOG", "info")
+    // }
 
     // initialise tracing
     tracing_subscriber::fmt()
@@ -159,7 +159,7 @@ async fn main() {
     info!("[+] Key loaded!");
 
     // bind to the socket
-    let socket = match Socket::bind(([0, 0, 0, 0], bind_port).into(), secret_key.clone()).await {
+    let (socket, mut unified_rx) = match Socket::bind(([0, 0, 0, 0], bind_port).into(), secret_key.clone()).await {
         Ok(s) => s,
         Err(_) => {
             error!("[-] Failed to bind to local.");
@@ -188,14 +188,10 @@ async fn main() {
 
     // add peers
     let senders: Arc<RwLock<Vec<mpsc::Sender<ProtocolPacket>>>> = Arc::new(RwLock::new(Vec::new()));
-    let receivers: Arc<RwLock<Vec<mpsc::Receiver<ProtocolPacket>>>> =
-        Arc::new(RwLock::new(Vec::new()));
 
     let senders_1 = senders.clone();
-    let receivers_1 = receivers.clone();
 
     let senders_2 = senders.clone();
-    let receivers_2 = receivers.clone();
 
     let socket_locked = Arc::new(RwLock::new(socket));
     let socket_locked_1 = socket_locked.clone();
@@ -208,18 +204,16 @@ async fn main() {
 
     tokio::task::spawn(async move {
         loop {
-            for app_inbound_rx in receivers.write().await.iter_mut() {
-                if let Ok(recv) = app_inbound_rx.try_recv() {
-                    match recv.packet_type {
-                        Some(ProtocolPacketType::PktMessage(m)) => {
-                            info!("<{0}>: {1}", m.username.clone(), m.content);
-                            display_attachments(m.username, m.attachments);
-                        }
-                        Some(_) => {}
-                        None => {}
+            if let Ok((_n, recv)) = unified_rx.try_recv() {
+                match recv.packet_type {
+                    Some(ProtocolPacketType::PktMessage(m)) => {
+                        info!("<{0}>: {1}", m.username.clone(), m.content);
+                        display_attachments(m.username, m.attachments);
                     }
-                };
-            }
+                    Some(_) => {}
+                    None => {}
+                }
+            };
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     });
@@ -233,7 +227,7 @@ async fn main() {
             for (conn, fingerprint) in conns.iter() {
                 if !seen.contains(conn) {
                     info!("[*] New connection from {:?}", conn);
-                    let (app_outbound_tx, app_inbound_rx) = socket_locked
+                    let app_outbound_tx = socket_locked
                         .write()
                         .await
                         .add_peer(
@@ -244,12 +238,11 @@ async fn main() {
                         .await;
                     {
                         senders_1.write().await.push(app_outbound_tx);
-                        receivers_1.write().await.push(app_inbound_rx);
                     }
                     seen.push(conn.clone());
                 }
             }
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(20)).await;
         }
     });
 
@@ -331,7 +324,7 @@ async fn main() {
                         )
                         .await
                         .expect("failed to lookup endpoint");
-                        let (app_outbound_tx, app_inbound_rx) = socket_locked_1
+                        let app_outbound_tx = socket_locked_1
                             .write()
                             .await
                             .add_peer(
@@ -343,7 +336,6 @@ async fn main() {
                         info!("[+] Sent request to {:?}", target);
                         {
                             senders_2.write().await.push(app_outbound_tx);
-                            receivers_2.write().await.push(app_inbound_rx);
                         }
                     }
                 }
