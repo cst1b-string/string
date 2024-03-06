@@ -21,6 +21,8 @@ use crate::{
 pub struct Context {
     /// The communication socket.
     pub socket: RwLock<StatefulSocket>,
+    /// The multiplexed inbound app receiver.
+    pub inbound_app_rx: RwLock<Option<mpsc::Receiver<(Vec<u8>, ProtocolPacket)>>>,
     /// The context data directory.
     pub data_dir: PathBuf,
     /// List of inbound application channels.
@@ -87,6 +89,7 @@ impl Context {
 
         Ok(Self {
             socket: StatefulSocket::Inactive.into(),
+            inbound_app_rx: None.into(),
             data_dir: data_dir.as_ref().to_owned(),
             cache: cache_prisma::new_client_with_url(&sqlite_path).await?,
             account_ctx: AccountContext::from_data_dir(&data_dir),
@@ -109,9 +112,10 @@ impl Context {
         *fingerprint = Some(secret_key.public_key().fingerprint());
 
         // create new socket
-        let (inner, _packets) =
+        let (inner, packets) =
             Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
         *socket = StatefulSocket::Active(inner);
+        self.inbound_app_rx.write().await.replace(packets);
 
         // look for initial peers
         let peers = self.cache.peer().find_many(vec![]).exec().await?;
