@@ -6,6 +6,7 @@ import { createContext, useState } from "react";
 
 import { Navbar } from "../components/navbar";
 import "./globals.css";
+import { LoginProvider } from "./loginContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,14 +31,16 @@ export default function RootLayout({
 
 	return (
 		<IntegrationProvider>
-			<ThemeContext.Provider value={{ lightMode, setLightMode }}>
-				<html lang="en">
-					<body className={inter.className}>
-						<Navbar />
-						{children}
-					</body>
-				</html>
-			</ThemeContext.Provider>
+			<LoginProvider>
+				<ThemeContext.Provider value={{ lightMode, setLightMode }}>
+					<html lang="en">
+						<body className={inter.className}>
+							<Navbar />
+							{children}
+						</body>
+					</html>
+				</ThemeContext.Provider>
+			</LoginProvider>
 		</IntegrationProvider>
 	);
 }
