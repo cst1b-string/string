@@ -1,8 +1,9 @@
 "use client";
 
 import { useRspc } from "@/integration";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 import { LoginContext } from "../loginContext";
 
@@ -64,6 +65,7 @@ export default function SignIn() {
 					>
 						Login
 					</button>
+					<Link href="/signUp">Don't have an account? Sign up here!</Link>
 				</form>
 			</div>
 		</div>

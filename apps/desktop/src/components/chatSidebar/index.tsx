@@ -13,7 +13,7 @@ export default function ChatSidebar({
 	setSelectedChannel: (channel: number) => void;
 }) {
 	const rspc = useRspc();
-	// const { data } = rspc.useQuery(["channel.list"]);
+	const { data } = rspc.useQuery(["channel.list"]);
 
 	const [isExpanded, setIsExpanded] = useState(false);
 	const toggleExpansion = () => {
@@ -21,17 +21,17 @@ export default function ChatSidebar({
 	};
 	const align = isExpanded ? "items-start" : "items-center";
 
-	const channel1: Channel = {
-		id: 1,
-		title: "New Channel",
-		networkId: 1,
-	};
-	const channel2: Channel = {
-		id: 2,
-		title: "Another Channel",
-		networkId: 2,
-	};
-	const data: Channel[] = [channel1, channel2];
+	// const channel1: Channel = {
+	// 	id: 1,
+	// 	title: "New Channel",
+	// 	networkId: 1,
+	// };
+	// const channel2: Channel = {
+	// 	id: 2,
+	// 	title: "Another Channel",
+	// 	networkId: 2,
+	// };
+	// const data: Channel[] = [channel1, channel2];
 
 	// You can then use the newChannel object in your code
 
