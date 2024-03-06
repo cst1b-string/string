@@ -3,40 +3,40 @@
 import { useRspc } from "@/integration";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useContext, useEffect, useState } from "react";
+import { useContext, useState } from "react";
 
 import { LoginContext } from "../../components/contexts/loginContext";
 
 export default function SignIn() {
 	const [username, setUsername] = useState("");
 	const { setIsLoggedIn } = useContext(LoginContext);
-	const [formSubmitted, setFormSubmitted] = useState(false);
+	const [isLoading, setIsLoading] = useState(false);
 
 	const rspc = useRspc();
-	const { error, isError, isLoading } = rspc.useQuery(["account.login", { username }]);
-	console.log("Error: ", isError, error);
+	const { mutate } = rspc.useMutation("account.login");
 	const router = useRouter();
 
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
-		setFormSubmitted(true);
+		setIsLoading(true);
+		mutate(
+			{ username: username },
+			{
+				onSuccess: (loginSuccess) => {
+					console.log(loginSuccess);
+					setIsLoggedIn(true);
+					console.log("redirecting");
+					router.push("/");
+				},
+				onError: (error) => {
+					console.log("Error: ", error);
+					router.push("/signUp");
+				},
+			}
+		);
 	};
 
-	useEffect(() => {
-		if (!isLoading && formSubmitted) {
-			if (!isError) {
-				setIsLoggedIn(true);
-				console.log("redirecting");
-				router.push("/");
-			} else {
-				console.log("Error: ", error);
-				router.push("/signUp");
-			}
-			setFormSubmitted(false); // Reset the formSubmitted state
-		}
-	}, [isLoading, formSubmitted]);
-
-	if (isLoading && formSubmitted) {
+	if (isLoading) {
 		return (
 			<div className="h-screen w-screen flex justify-center items-center">
 				<div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-white"></div>
