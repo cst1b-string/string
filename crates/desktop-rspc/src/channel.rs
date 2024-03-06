@@ -112,6 +112,7 @@ async fn send_message(ctx: Ctx, args: SendMessageArgs) -> Result<(), rspc::Error
             ));
         }
     };
+    // socket.send_gossip_encrypted(ms, destination);
 
     // push message to cache - maybe wait for response from socket?
     ctx.cache

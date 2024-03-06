@@ -15,7 +15,7 @@ use smallvec::smallvec;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::Ctx;
+use crate::{context::ContextError, Ctx};
 
 /// The account context.
 #[derive(Debug)]
@@ -85,7 +85,19 @@ async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
     })?;
 
     ctx.setup_socket(secret_key).await.map_err(|err| {
-        rspc::Error::with_cause(rspc::ErrorCode::InternalServerError, "".to_string(), err)
+        rspc::Error::with_cause(
+            rspc::ErrorCode::InternalServerError,
+            match &err {
+                &ContextError::NewClientError(_) => "failed to create prisma client",
+                &ContextError::SettingsContextError(_) => "failed to initialise settings",
+                &ContextError::LighthouseContextError(_) => "failed to initialise lighthouse",
+                &ContextError::PrismaError(_) => "encountered prisma query error",
+                &ContextError::SocketActive => "socket already active",
+                &ContextError::SocketError(_) => "error setting up socket",
+            }
+            .to_string(),
+            err,
+        )
     })?;
 
     Ok(())
@@ -155,7 +167,11 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
     })?;
 
     ctx.setup_socket(secret_key).await.map_err(|err| {
-        rspc::Error::with_cause(rspc::ErrorCode::InternalServerError, "".to_string(), err)
+        rspc::Error::with_cause(
+            rspc::ErrorCode::InternalServerError,
+            "failed to set up socket".to_string(),
+            err,
+        )
     })?;
 
     Ok(())
