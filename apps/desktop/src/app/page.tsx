@@ -3,7 +3,7 @@
 import ChatLog from "@/components/chatLog";
 import ChatSidebar from "@/components/chatSidebar";
 import { useRspc } from "@/integration";
-import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { createContext, useContext, useState } from "react";
 
 import { LoginContext } from "../components/contexts/loginContext";
@@ -16,11 +16,13 @@ export const themeContext = createContext({
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
 	const { isLoggedIn } = useContext(LoginContext);
+	console.log("isLoggedIn main page: ", isLoggedIn);
 	const [inputValue, setInputValue] = useState("");
+	const router = useRouter();
 
 	if (!isLoggedIn) {
 		console.log("in main page");
-		redirect("/signIn");
+		router.push("/signIn");
 	}
 
 	const [lightMode, setLightMode] = useState(false);

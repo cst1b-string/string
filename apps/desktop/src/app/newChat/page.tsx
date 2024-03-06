@@ -1,14 +1,17 @@
 "use client";
 
+import { LoginContext } from "@/components/contexts/loginContext";
 import { useRspc } from "@/integration";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useContext, useState } from "react";
 
 export default function NewChat() {
 	const [channel_title, setChannelTitle] = useState("");
 	const rspc = useRspc();
 	const { mutate } = rspc.useMutation("channel.create");
 	const router = useRouter();
+	const { isLoggedIn } = useContext(LoginContext);
+	console.log("isLoggedIn new chat page: ", isLoggedIn);
 
 	const handleCreateChannel = () => {
 		mutate({ title: channel_title, network_id: 1 });
