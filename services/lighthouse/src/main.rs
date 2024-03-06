@@ -1,28 +1,30 @@
 use std::{
     borrow::Cow,
     net::{AddrParseError, SocketAddr},
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
 
 use axum::{
     error_handling::HandleErrorLayer,
+    extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     BoxError, Extension, Json, Router,
 };
 use axum_macros::debug_handler;
 use lighthouse_prisma::PrismaClient;
-use pgp::{composed::SignedPublicKey, Deserializable};
-use serde::{Deserialize, Serialize};
+use lighthouse_protocol::{
+    GetNodeAddrPayload, GetNodeAddrResponse, ListPotentialPeersPayload, ListPotentialPeersResponse,
+    RegisterNodeAddrPayload, RegisterNodeAddrResponse, Sign,
+};
+
+use serde::Serialize;
 use thiserror::Error;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
 use tower_http::{add_extension::AddExtensionLayer, trace::TraceLayer};
-
-use string_comm::crypto::Crypto;
 
 /// Defines the available error types.
 #[allow(dead_code)]
@@ -86,7 +88,9 @@ async fn report_status() -> (StatusCode, Json<Status>) {
 
 /// This (debug) endpoint wipes the database so we don't accumulate stuff across tests
 #[debug_handler]
-async fn wipe_all(Extension(ctx): Extension<Arc<LighthouseCtx>>) -> Result<(), LighthouseError> {
+async fn wipe_node_entries(
+    Extension(ctx): Extension<Arc<LighthouseCtx>>,
+) -> Result<(), LighthouseError> {
     let db = ctx.db.write().await;
 
     db.pubkey().delete_many(vec![]).exec().await?;
@@ -105,199 +109,130 @@ async fn wipe_all(Extension(ctx): Extension<Arc<LighthouseCtx>>) -> Result<(), L
     Ok(())
 }
 
-fn verify_data(
-    pubkey_str: &str,
-    signature_str: &String,
-    input: &String,
-    timestamp: u32,
-) -> Result<(), LighthouseError> {
-    let now: u32 = chrono::Utc::now().timestamp() as u32;
-
-    if timestamp < now - 30 || timestamp > now + 30 {
-        return Err(LighthouseError::SignatureError);
-    }
-
-    let (pubkey, _headers) = SignedPublicKey::from_string(pubkey_str)?;
-
-    let signature = hex::decode(signature_str).map_err(|_| LighthouseError::SignatureError)?;
-
-    let data = format!("{}-{}", input, timestamp);
-
-    Crypto::verify_data_static(&pubkey, &signature, data.as_bytes())
-        .map_err(|_| LighthouseError::SignatureError)?;
-
-    Ok(())
-}
-
-#[derive(Deserialize)]
-struct RegisterEndpointPayload {
-    endpoint: String,
-    pubkey: String,
-    signature: String,
-    timestamp: u32,
-}
-
-#[derive(Deserialize)]
-struct LookupEndpointPayload {
-    id: String,
-    client: String,
-    fingerprint: String,
-}
-
-#[derive(Deserialize)]
-struct ListConnPayload {
-    id: String,
-    signature: String,
-    timestamp: u32,
-}
-
-#[derive(Serialize)]
-struct RegisterEndpointResponse {
-    id: String,
-}
-
-#[derive(Serialize)]
-struct LookupEndpointResponse {
-    endpoint: String,
-}
-
-#[derive(Serialize)]
-struct ListConnResponse {
-    conns: Vec<(String, String)>,
-}
-
 /// This endpoint handles the registration of a new endpoint.
 #[debug_handler]
-async fn register_endpoint(
+async fn register_node_addr(
     Extension(ctx): Extension<Arc<LighthouseCtx>>,
-    Json(payload): Json<RegisterEndpointPayload>,
+    Json(payload): Json<RegisterNodeAddrPayload>,
 ) -> Result<Response, LighthouseError> {
     let db = ctx.db.write().await;
 
-    let endpoint = SocketAddr::from_str(&payload.endpoint)?;
-
-    verify_data(
-        &payload.pubkey,
-        &payload.signature,
-        &payload.endpoint,
-        payload.timestamp,
-    )?;
+    // verify the payload
+    payload.verify()?;
 
     let existing_rec = db
         .endpoint()
         .find_first(vec![
-            lighthouse_prisma::endpoint::ip::equals(endpoint.ip().to_string()),
-            lighthouse_prisma::endpoint::port::equals(endpoint.port().into()),
+            lighthouse_prisma::endpoint::ip::equals(payload.addr.ip().to_string()),
+            lighthouse_prisma::endpoint::port::equals(payload.addr.port().into()),
         ])
         .exec()
         .await?;
 
-    if let Some(rec) = existing_rec {
-        return Ok(Json(RegisterEndpointResponse { id: rec.id }).into_response());
+    if existing_rec.is_some() {
+        return Ok(Json(RegisterNodeAddrResponse {}).into_response());
     }
 
-    let endpoint_rec = db
+    // create an endpoint record
+    let endpoint = db
         .endpoint()
         .create(
-            endpoint.ip().to_string(),
-            endpoint.port().into(),
+            payload.addr.ip().to_string(),
+            payload.addr.port().into(),
             chrono::Utc::now().fixed_offset(),
             vec![],
         )
         .exec()
         .await?;
 
+    // store the pubkey
     db.pubkey()
         .create(
-            lighthouse_prisma::endpoint::id::equals(endpoint_rec.id.clone()),
-            payload.pubkey,
+            lighthouse_prisma::endpoint::id::equals(endpoint.id.clone()),
+            payload.public_key,
             vec![],
         )
         .exec()
         .await?;
 
-    Ok(Json(RegisterEndpointResponse {
-        id: endpoint_rec.id,
-    })
-    .into_response())
+    Ok(Json(RegisterNodeAddrResponse {}).into_response())
 }
 
 /// This endpoint handles the lookup of a endpoint.
 #[debug_handler]
-async fn lookup_endpoint(
+async fn get_node_addr(
+    Path(fingerprint): Path<String>,
     Extension(ctx): Extension<Arc<LighthouseCtx>>,
-    Json(payload): Json<LookupEndpointPayload>,
+    Json(payload): Json<GetNodeAddrPayload>,
 ) -> Result<Response, LighthouseError> {
     let db = ctx.db.write().await;
 
-    let client = SocketAddr::from_str(&payload.client)?;
-
-    let endpoint_rec = db
+    // find the endpoint
+    let endpoint = db
         .endpoint()
         .find_first(vec![lighthouse_prisma::endpoint::id::equals(
-            payload.id.clone(),
+            fingerprint.clone(),
         )])
         .exec()
         .await?
         .ok_or(LighthouseError::InvalidId)?;
 
+    // store an entry in the pending connections table
     db.pending_connection()
         .create(
-            lighthouse_prisma::endpoint::id::equals(payload.id.clone()),
-            client.ip().to_string(),
-            client.port().into(),
-            hex::decode(payload.fingerprint)?,
+            lighthouse_prisma::endpoint::id::equals(fingerprint.clone()),
+            payload.addr.ip().to_string(),
+            payload.addr.port().into(),
+            hex::decode(&fingerprint)?,
             vec![],
         )
         .exec()
         .await?;
 
-    Ok(Json(LookupEndpointResponse {
-        endpoint: format!("{}:{}", endpoint_rec.ip, endpoint_rec.port),
+    Ok(Json(GetNodeAddrResponse {
+        addr: SocketAddr::new(
+            endpoint
+                .ip
+                .parse()
+                .expect("stored information was not an IP address"),
+            endpoint
+                .port
+                .try_into()
+                .expect("stored information was not a port"),
+        ),
     })
     .into_response())
 }
 
 /// This endpoint handles the listing of all pending connections
 #[debug_handler]
-async fn list_conns(
+async fn list_potential_peers(
     Extension(ctx): Extension<Arc<LighthouseCtx>>,
-    Json(payload): Json<ListConnPayload>,
+    Json(payload): Json<ListPotentialPeersPayload>,
 ) -> Result<Response, LighthouseError> {
     let db = ctx.db.write().await;
 
-    let pubkey_str = db
-        .pubkey()
-        .find_first(vec![lighthouse_prisma::pubkey::endpoint_id::equals(
-            payload.id.clone(),
-        )])
-        .exec()
-        .await?
-        .ok_or(LighthouseError::InvalidId)?
-        .pubkey;
+    // verify the payload
+    payload.verify()?;
 
-    verify_data(
-        &pubkey_str,
-        &payload.signature,
-        &payload.id,
-        payload.timestamp,
-    )?;
-
-    let conns = db
+    let addrs = db
         .pending_connection()
         .find_many(vec![
-            lighthouse_prisma::pending_connection::endpoint_id::equals(payload.id),
+            lighthouse_prisma::pending_connection::endpoint_id::equals(payload.fingerprint.clone()),
         ])
         .exec()
         .await?;
 
-    Ok(Json(ListConnResponse {
-        conns: conns
+    Ok(Json(ListPotentialPeersResponse {
+        addrs: addrs
             .iter()
-            .map(|rec| {
+            .map(|entry| {
                 (
-                    format!("{}:{}", rec.ip, rec.port),
-                    hex::encode(rec.fingerprint.clone()),
+                    hex::encode(entry.fingerprint.clone()),
+                    SocketAddr::new(
+                        entry.ip.parse().expect("stored data was not an IP address"),
+                        entry.port as u16,
+                    ),
                 )
             })
             .collect(),
@@ -346,16 +281,15 @@ async fn main() {
         .expect("failed to create database client");
 
     let ctx = LighthouseCtx { db: prisma.into() };
-
-    let arc_ctx = Arc::new(ctx);
+    let ctx = Arc::new(ctx);
 
     // create app router
     let app = Router::new()
         .route("/", get(report_status))
-        .route("/register", post(register_endpoint))
-        .route("/lookup", post(lookup_endpoint))
-        .route("/listconns", post(list_conns))
-        .route("/wipe", get(wipe_all)) // Testing purposes
+        .route("/nodes", post(register_node_addr))
+        .route("/nodes/:fingerprint", get(get_node_addr))
+        .route("/peers", get(list_potential_peers))
+        .route("/nodes", delete(wipe_node_entries)) // Testing purposes
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_error))
@@ -363,7 +297,7 @@ async fn main() {
                 .concurrency_limit(1024)
                 .timeout(Duration::from_secs(10))
                 .layer(TraceLayer::new_for_http())
-                .layer(AddExtensionLayer::new(arc_ctx.clone()))
+                .layer(AddExtensionLayer::new(ctx.clone()))
                 .into_inner(),
         );
 
@@ -372,7 +306,7 @@ async fn main() {
         .await
         .expect("failed to bind listener");
 
-    start_db_cleanup_worker(arc_ctx);
+    start_db_cleanup_worker(ctx);
 
     axum::serve(
         listener,

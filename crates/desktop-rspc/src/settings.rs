@@ -6,6 +6,7 @@ use rspc::{RouterBuilder, Type};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::Ctx;
 
@@ -24,6 +25,7 @@ pub struct Settings {
 }
 
 /// The context for the settings.
+#[derive(Debug)]
 pub struct SettingsContext {
     /// The underlying settings.
     pub settings: RwLock<Settings>,
@@ -40,17 +42,24 @@ pub enum SettingsError {
 
 impl SettingsContext {
     /// Attempt to load the settings from the given path.
-    pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, SettingsError> {
-        let path = path.as_ref();
+    pub async fn from_data_dir<P: AsRef<Path>>(path: P) -> Result<Self, SettingsError> {
+        let path = path.as_ref().to_owned();
+        let settings_path = path.join("settings.json");
+        info!("- Settings path: {:?}", settings_path);
+
         // check if file exists, otherwise copy defaults
-        if !path.exists() {
+        if !settings_path.exists() {
+            tokio::fs::create_dir_all(path).await?;
+            let file = tokio::fs::File::create(&settings_path).await?;
             let settings = Settings::default();
-            let file = std::fs::File::create(path)?;
-            serde_json::to_writer(file, &settings)?;
+            serde_json::to_writer(
+                file.try_into_std().expect("failed to downcast tokio File"),
+                &settings,
+            )?;
         }
 
         // read from file
-        let content = tokio::fs::read_to_string(path).await?;
+        let content = tokio::fs::read_to_string(&settings_path).await?;
         let settings = serde_json::from_str(&content)?;
 
         Ok(Self::from_settings(settings))

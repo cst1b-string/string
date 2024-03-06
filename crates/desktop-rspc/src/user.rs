@@ -10,13 +10,10 @@ pub fn attach_user_queries<TMeta: Send>(
 }
 
 /// Fetch a list of users from the cache.
-pub async fn list_users(
-    ctx: Ctx,
-    network_id: i32,
-) -> Result<Vec<cache_prisma::user::Data>, rspc::Error> {
+pub async fn list_users(ctx: Ctx, _: ()) -> Result<Vec<cache_prisma::user::Data>, rspc::Error> {
     ctx.cache
         .user()
-        .find_many(vec![cache_prisma::user::network_id::equals(network_id)])
+        .find_many(vec![])
         .exec()
         .await
         .map_err(|err| {

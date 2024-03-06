@@ -2,25 +2,20 @@
 
 import ChatSidebar from "@/components/chatSidebar";
 import ChatLog from "@/components/chatlog";
-//import Textarea from "@mui/joy/Textarea";
+import { useState } from "react";
 
 export default function Home() {
-	return (
-		<div className="grid grid-cols-3 divide-x divide-gray-400 h-[calc(100vh-80px)]">
-			<div className="">
-				<ChatSidebar />
-				<div className="col-span-2 text-white font-bold ">
-					<ChatLog />
-					{/* <div style={{ padding: "10px 0", position: "relative", left: "1%", width: "95%" }}>
-						<textarea placeholder="Type a message here..." color="neutral" />
-					</div> */}
-				</div>
-			</div>
+	const [selectedChannel, setSelectedChannel] = useState(-1);
 
-			<div className="col-span-2 text-white font-bold ">
-				<ChatLog />
-				<div style={{ padding: "10px 0", position: "relative", left: "1%", width: "95%" }}>
-					<input
+	return (
+		<div className="grid grid-cols-[auto,1fr] h-[calc(100vh-60px)]">
+			<ChatSidebar selectedChannel={selectedChannel} setSelectedChannel={setSelectedChannel} />
+			<div className="grid grid-rows-[1fr,auto] h-full">
+				<ChatLog selectedChannel={selectedChannel} />
+				<div className="px-2 py-2 min-h-16">
+					<textarea
+						placeholder="Type a message here..."
+						className="px-1 h-16 w-full input rounded bg-darkSidebar text-darkText"
 					/>
 				</div>
 			</div>
