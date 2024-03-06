@@ -109,9 +109,9 @@ impl Context {
         *fingerprint = Some(secret_key.public_key().fingerprint());
 
         // create new socket
-        *socket = StatefulSocket::Active(
-            Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?,
-        );
+        let (inner, _packets) =
+            Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
+        *socket = StatefulSocket::Active(inner);
 
         // look for initial peers
         let peers = self.cache.peer().find_many(vec![]).exec().await?;
