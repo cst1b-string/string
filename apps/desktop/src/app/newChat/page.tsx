@@ -14,7 +14,7 @@ export default function NewChat() {
 	console.log("isLoggedIn new chat page: ", isLoggedIn);
 
 	const handleCreateChannel = () => {
-		mutate({ title: channel_title, network_id: 1 });
+		mutate({ title: channel_title });
 		router.push("/");
 	};
 
