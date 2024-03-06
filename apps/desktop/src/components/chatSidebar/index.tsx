@@ -66,9 +66,7 @@ export default function ChatSidebar({
 	};
 
 	return (
-		<div
-			className={`bg-darkSidebar h-full ${isExpanded ? "min-w-70" : "min-w-20"} grid grid-rows-[auto,1fr,auto]`}
-		>
+		<div className={`bg-darkSidebar h-full ${isExpanded ? "min-w-70" : "min-w-20"} flex flex-col`}>
 			<div
 				className={`${isExpanded ? "grid grid-cols-5" : "flex justify-center"} space-x-1 h-[60px] py-2 px-2`}
 			>
@@ -85,7 +83,7 @@ export default function ChatSidebar({
 					{isExpanded ? "-" : "+"}
 				</button>
 			</div>
-			<div className="px-2 py-2 flex flex-col items-center no-scrollbar overflow-auto space-y-1 bg-transparent">
+			<div className="px-2 py-2 flex flex-col items-center no-scrollbar overflow-auto space-y-1 bg-transparent flex-1">
 				{data &&
 					data.length > 0 &&
 					data.map((channel) => (

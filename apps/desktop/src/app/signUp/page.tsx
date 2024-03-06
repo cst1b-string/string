@@ -48,7 +48,7 @@ export default function SignUp() {
 
 	return (
 		<div className="py-6 flex justify-center">
-			<div className="bg-[#113355] text-white rounded px-12 py-10 flex flex-col space-y-4 w-96">
+			<div className="bg-darkSidebar text-white rounded px-12 py-10 flex flex-col space-y-4 w-96">
 				<h1 className="text-2xl font-bold">Welcome to String!</h1>
 				<p>
 					A peer-to-peer social network focused on security and privacy. Simply enter a username to
@@ -62,7 +62,7 @@ export default function SignUp() {
 							required
 							onChange={(e) => setUsername(e.target.value)}
 							type="text"
-							className="py-1 px-1 rounded bg-[#335577] w-full"
+							className="py-1 px-1 rounded bg-darkBackground w-full"
 						/>
 					</label>
 					<label>
@@ -73,7 +73,7 @@ export default function SignUp() {
 							type="password"
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
-							className="py-1 px-1 rounded bg-[#335577] w-full"
+							className="py-1 px-1 rounded bg-darkBackground w-full"
 						/>
 					</label>
 					<label>
@@ -84,14 +84,14 @@ export default function SignUp() {
 							type="password"
 							value={confirmPassword}
 							onChange={(e) => setConfirmPassword(e.target.value)}
-							className="py-1 px-1 rounded bg-[#335577] w-full"
+							className="py-1 px-1 rounded bg-darkBackground w-full"
 						/>
 					</label>
 					{!passwordsMatch && <p className="text-red-500">Passwords do not match</p>}
 					<button
 						type="submit"
 						disabled={!passwordsMatch}
-						className="py-2 hover:bg-[#224466] rounded drop-shadow-lg bg-[#335577] text-white"
+						className="py-2 hover:bg-darkBackground rounded drop-shadow-lg bg-darkBackground text-darkText"
 					>
 						Create Account
 					</button>
