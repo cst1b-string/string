@@ -2,6 +2,7 @@
 
 import ChatLog from "@/components/chatLog";
 import ChatSidebar from "@/components/chatSidebar";
+
 import { useRspc } from "@/integration";
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useState } from "react";
@@ -12,6 +13,7 @@ export const themeContext = createContext({
 	lightMode: false,
 	setLightMode: (value: boolean) => {},
 });
+
 
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
@@ -36,6 +38,7 @@ export default function Home() {
 			console.log("channelid: ", selectedChannel);
 		}
 	};
+
 
 	return (
 		<div className="grid grid-cols-[auto,1fr] h-[calc(100vh-60px)]">
