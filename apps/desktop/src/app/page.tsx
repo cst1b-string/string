@@ -2,7 +2,6 @@
 
 import ChatLog from "@/components/chatLog";
 import ChatSidebar from "@/components/chatSidebar";
-import ChatLog from "@/components/chatlog";
 import { useRspc } from "@/integration";
 import { redirect } from "next/navigation";
 import { createContext, useContext, useState } from "react";
@@ -28,7 +27,7 @@ export default function Home() {
 	const rspc = useRspc();
 	const sendMsg = rspc.useMutation("channel.send");
 
-	const keyDown = (event) => {
+	const keyDown = (event: React.KeyboardEvent) => {
 		console.log("pressed something");
 		if (inputValue.length > 0 && event.key == "Enter") {
 			sendMsg.mutate({ channel_id: selectedChannel, content: inputValue });
