@@ -42,7 +42,7 @@ pub fn attach_account_queries<TMeta: Send>(
 ) -> RouterBuilder<Ctx, TMeta> {
     builder
         .query("account.fingerprint", |t| t(get_fingerprint))
-        .query("account.login", |t| t(login_account))
+        .mutation("account.login", |t| t(login_account))
         .mutation("account.create", |t| t(create_account))
 }
 
@@ -88,12 +88,12 @@ async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
         rspc::Error::with_cause(
             rspc::ErrorCode::InternalServerError,
             match &err {
-                &ContextError::NewClientError(_) => "failed to create prisma client",
-                &ContextError::SettingsContextError(_) => "failed to initialise settings",
-                &ContextError::LighthouseContextError(_) => "failed to initialise lighthouse",
-                &ContextError::PrismaError(_) => "encountered prisma query error",
-                &ContextError::SocketActive => "socket already active",
-                &ContextError::SocketError(_) => "error setting up socket",
+                ContextError::NewClientError(_) => "failed to create prisma client",
+                ContextError::SettingsContextError(_) => "failed to initialise settings",
+                ContextError::LighthouseContextError(_) => "failed to initialise lighthouse",
+                ContextError::PrismaError(_) => "encountered prisma query error",
+                ContextError::SocketActive => "socket already active",
+                ContextError::SocketError(_) => "error setting up socket",
             }
             .to_string(),
             err,

@@ -8,7 +8,7 @@ use string_comm::{Socket, DEFAULT_PORT};
 use string_protocol::ProtocolPacket;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
     account::AccountContext,
@@ -100,18 +100,23 @@ impl Context {
     }
 
     /// Setup the socket for the context.
+    #[tracing::instrument]
     pub async fn setup_socket(&self, secret_key: SignedSecretKey) -> Result<(), ContextError> {
         // check if socket is active
+        debug!("Checking if socket is active...");
         let mut socket = self.socket.write().await;
         if matches!(*socket, StatefulSocket::Active(_)) {
             return Err(ContextError::SocketActive);
         }
+        debug!("Socket is not active, we can continue.");
 
         // store user fingerprint
+        debug!("Storing user fingerprint...");
         let mut fingerprint = self.account_ctx.fingerprint.write().await;
         *fingerprint = Some(secret_key.public_key().fingerprint());
 
         // create new socket
+        debug!("Creating new socket... binding to 0.0.0.0:{}", DEFAULT_PORT);
         let (inner, packets) =
             Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
         *socket = StatefulSocket::Active(inner);
