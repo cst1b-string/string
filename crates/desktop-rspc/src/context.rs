@@ -101,7 +101,11 @@ impl Context {
 
     /// Setup the socket for the context.
     #[tracing::instrument]
-    pub async fn setup_socket(&self, secret_key: SignedSecretKey) -> Result<(), ContextError> {
+    pub async fn setup_socket(
+        &self,
+        username: String,
+        secret_key: SignedSecretKey,
+    ) -> Result<(), ContextError> {
         // check if socket is active
         debug!("Checking if socket is active...");
         let mut socket = self.socket.write().await;
@@ -115,16 +119,23 @@ impl Context {
         let mut fingerprint = self.account_ctx.fingerprint.write().await;
         *fingerprint = Some(secret_key.public_key().fingerprint());
 
-        // create new socket
-        debug!("Creating new socket... binding to 0.0.0.0:{}", DEFAULT_PORT);
-        let (mut inner, packets) =
-            Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
-
         // prepare database
         self.cache
             ._db_push()
             .await
             .expect("failed to push to database - fuck");
+
+        // setup own user if it doesnt exist
+        self.cache.user().upsert(
+            cache_prisma::user::id::equals(secret_key.public_key().fingerprint()),
+            cache_prisma::user::create(secret_key.public_key().fingerprint(), username, vec![]),
+            vec![],
+        );
+
+        // create new socket
+        debug!("Creating new socket... binding to 0.0.0.0:{}", DEFAULT_PORT);
+        let (mut inner, packets) =
+            Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
 
         // look for initial peers
         let peers = self.cache.peer().find_many(vec![]).exec().await?;
