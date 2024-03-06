@@ -228,9 +228,9 @@ impl Crypto {
         Crypto::verify_data_static(signed_pub_key, signature, bytes)
     }
 
-    pub fn sign_data_static(
+    pub fn sign_data_static<Data: AsRef<[u8]>>(
         secret_key: &SignedSecretKey,
-        bytes: &Vec<u8>,
+        bytes: Data,
     ) -> Result<Vec<u8>, SigningError> {
         // So apparently the official RFC calls for more stuff but this works
         let digest = {

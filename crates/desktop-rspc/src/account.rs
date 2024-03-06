@@ -6,17 +6,16 @@ use std::{
 
 use pgp::{
     crypto::{hash::HashAlgorithm, sym::SymmetricKeyAlgorithm},
-    types::{CompressionAlgorithm, KeyTrait, SecretKeyTrait},
+    types::CompressionAlgorithm,
     Deserializable, KeyType, SecretKeyParamsBuilder, SignedSecretKey,
 };
 use rspc::{RouterBuilder, Type};
 use serde::Deserialize;
 use smallvec::smallvec;
-use string_comm::Socket;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::{context::StatefulSocket, Ctx};
+use crate::Ctx;
 
 /// The account context.
 #[derive(Debug)]
@@ -85,31 +84,9 @@ async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
         )
     })?;
 
-    // check if socket is active
-    let mut socket = ctx.socket.write().await;
-    if matches!(*socket, StatefulSocket::Active(_)) {
-        return Err(rspc::Error::new(
-            rspc::ErrorCode::Conflict,
-            "Socket already active".to_string(),
-        ));
-    }
-
-    // store user fingerprint
-    let mut fingerprint = ctx.account_ctx.fingerprint.write().await;
-    *fingerprint = Some(secret_key.public_key().fingerprint());
-
-    // create new socket
-    *socket = StatefulSocket::Active(
-        Socket::bind(([0, 0, 0, 0], 40000).into(), secret_key)
-            .await
-            .map_err(|err| {
-                rspc::Error::with_cause(
-                    rspc::ErrorCode::InternalServerError,
-                    "failed to start socket server".to_string(),
-                    err,
-                )
-            })?,
-    );
+    ctx.setup_socket(secret_key).await.map_err(|err| {
+        rspc::Error::with_cause(rspc::ErrorCode::InternalServerError, "".to_string(), err)
+    })?;
 
     Ok(())
 }
@@ -177,31 +154,9 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
         )
     })?;
 
-    // check if socket is active - technically code dupe but shhhh
-    let mut socket = ctx.socket.write().await;
-    if matches!(*socket, StatefulSocket::Active(_)) {
-        return Err(rspc::Error::new(
-            rspc::ErrorCode::Conflict,
-            "Socket already active".to_string(),
-        ));
-    }
-
-    // store user fingerprint
-    let mut fingerprint = ctx.account_ctx.fingerprint.write().await;
-    *fingerprint = Some(secret_key.public_key().fingerprint());
-
-    // create new socket
-    *socket = StatefulSocket::Active(
-        Socket::bind(([0, 0, 0, 0], 40000).into(), secret_key)
-            .await
-            .map_err(|err| {
-                rspc::Error::with_cause(
-                    rspc::ErrorCode::InternalServerError,
-                    "failed to start socket server".to_string(),
-                    err,
-                )
-            })?,
-    );
+    ctx.setup_socket(secret_key).await.map_err(|err| {
+        rspc::Error::with_cause(rspc::ErrorCode::InternalServerError, "".to_string(), err)
+    })?;
 
     Ok(())
 }

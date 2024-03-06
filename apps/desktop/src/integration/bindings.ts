@@ -7,7 +7,7 @@ export type Procedures = {
         { key: "channel.list", input: never, result: Channel[] } | 
         { key: "channel.messages", input: number, result: Message[] } | 
         { key: "settings.theme", input: never, result: Theme } | 
-        { key: "user.list", input: number, result: User[] },
+        { key: "user.list", input: never, result: User[] },
     mutations: 
         { key: "account.create", input: CreateAccountArgs, result: null } | 
         { key: "channel.create", input: CreateChannelArgs, result: Channel } | 
@@ -17,26 +17,26 @@ export type Procedures = {
         { key: "event", input: never, result: Event }
 };
 
+export type LoginArgs = { username: string }
+
+export type Event = "Tick" | "NotConnected" | { MessageReceived: { author: string; channel_id: string; content: string } }
+
+export type CreateChannelArgs = { title: string }
+
+export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }
+
 /**
  * Send a message to the network.
  */
 export type SendMessageArgs = { channel_id: number; content: string }
-
-export type Channel = { id: number; title: string; networkId: number }
-
-export type CreateChannelArgs = { title: string; network_id: number }
-
-export type LoginArgs = { username: string }
-
-export type CreateAccountArgs = { username: string; passphrase: string }
 
 /**
  * The theme of the application.
  */
 export type Theme = "Light" | "Dark"
 
-export type User = { id: number[]; username: string; networkId: number }
+export type User = { id: number[]; username: string }
 
-export type Event = "Tick"
+export type CreateAccountArgs = { username: string; passphrase: string }
 
-export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }
+export type Channel = { id: number; title: string }

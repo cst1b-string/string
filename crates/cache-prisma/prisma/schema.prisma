@@ -8,13 +8,6 @@ generator client {
     output   = "../src/prisma.rs"
 }
 
-model Network {
-    id       Int       @id @default(autoincrement())
-    name     String
-    channels Channel[]
-    users    User[]
-}
-
 model Message {
     id        Int      @id @default(autoincrement())
     content   String
@@ -26,26 +19,21 @@ model Message {
 }
 
 model Channel {
-    id        Int       @id @default(autoincrement())
-    title     String
-    messages  Message[]
-    network   Network   @relation(fields: [networkId], references: [id])
-    networkId Int
+    id       Int       @id @default(autoincrement())
+    title    String
+    messages Message[]
 }
 
 model User {
-    id        Bytes     @id
-    username  String
-    messages  Message[]
-    network   Network   @relation(fields: [networkId], references: [id])
-    networkId Int
-    peer      Peer?
+    id       Bytes     @id
+    username String
+    messages Message[]
+    peer     Peer?
 }
 
 model Peer {
-    id       Int      @id @default(autoincrement())
-    user     User     @relation(fields: [userId], references: [id])
-    userId   Bytes    @unique
+    id       Bytes    @id
+    user     User     @relation(fields: [id], references: [id])
     address  String
     port     Int
     lastSeen DateTime
