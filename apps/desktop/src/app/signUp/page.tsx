@@ -1,8 +1,9 @@
 "use client";
 
+import { LoginContext } from "@/components/contexts/loginContext";
 import { useRspc } from "@/integration";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useContext, useState } from "react";
 
 export default function SignUp() {
 	const [password, setPassword] = useState("");
@@ -10,6 +11,7 @@ export default function SignUp() {
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [passwordsMatch, setPasswordsMatch] = useState(true);
 	const [isLoading, setIsLoading] = useState(false);
+	const { setIsLoggedIn } = useContext(LoginContext);
 
 	const rspc = useRspc();
 	const createAccount = rspc.useMutation("account.create");
@@ -28,6 +30,7 @@ export default function SignUp() {
 						console.log(loginSuccess);
 						setIsLoading(false);
 						console.log("redirecting");
+						setIsLoggedIn(true);
 						router.push("/");
 					},
 				}
