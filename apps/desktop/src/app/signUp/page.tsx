@@ -1,7 +1,7 @@
 "use client";
 
 import { useRspc } from "@/integration";
-import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function SignUp() {
@@ -12,6 +12,7 @@ export default function SignUp() {
 
 	const rspc = useRspc();
 	const createAccount = rspc.useMutation("account.create");
+	const router = useRouter();
 
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
@@ -26,7 +27,7 @@ export default function SignUp() {
 						console.log(loginSuccess);
 						setIsLoading(false);
 						console.log("redirecting");
-						redirect("/signIn");
+						router.push("/signIn");
 					},
 				}
 			);
