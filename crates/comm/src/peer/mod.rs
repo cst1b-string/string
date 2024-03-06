@@ -199,14 +199,18 @@ impl Peer {
         message: crypto::v1::signed_packet_internal::MessageType,
         destination: String,
     ) -> Result<(), PeerError> {
+        let weaken = destination == "*";
         let internal = crypto::v1::SignedPacketInternal {
             destination,
             source: self.username.clone(),
             message_type: Some(message),
         };
         let signature = {
-            let crypto = self.crypto.read().await;
-            crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+            if !weaken {
+                let crypto = self.crypto.read().await;
+                crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+            }
+            else { vec![] }
         };
         let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
@@ -231,12 +235,15 @@ impl Peer {
         let bytes = try_encode_packet(&packet).map_err(PeerError::EncodeFail)?;
         // encrypt message contents
         let content = {
-            let mut crypto = self.crypto.write().await;
-            let ratchet = crypto
-                .ratchets
-                .get_mut(&destination)
-                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-            ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+            if destination == "*" {
+                let mut crypto = self.crypto.write().await;
+                let ratchet = crypto
+                    .ratchets
+                    .get_mut(&destination)
+                    .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+            }
+            else { bytes }
         };
         self.send_gossip_single(
             MessageType::EncryptedPacket(crypto::v1::EncryptedPacket { content }),
@@ -269,9 +276,10 @@ impl Peer {
         let source = signed_data.source;
         let mut forward = false;
         let dest = signed_data.destination;
+        let weaken = dest == "*";
 
-        if dest == self.username {
-            {
+        if dest == self.username || dest == "*" {
+            if !weaken {
                 let crypto_obj = self.crypto.read().await;
                 crypto_obj.verify_data(
                     &source,
@@ -311,12 +319,15 @@ impl Peer {
                 }
                 Some(MessageType::EncryptedPacket(enc)) => {
                     let bytes = {
-                        let mut crypto = self.crypto.write().await;
-                        let ratchet = crypto
-                            .ratchets
-                            .get_mut(&source)
-                            .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-                        ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                        if !weaken {
+                            let mut crypto = self.crypto.write().await;
+                            let ratchet = crypto
+                                .ratchets
+                                .get_mut(&source)
+                                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                            ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                        }
+                        else { enc.content }
                     };
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
