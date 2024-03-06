@@ -4,11 +4,11 @@ use pgp::{
     types::{KeyTrait, SecretKeyTrait},
     SignedSecretKey,
 };
-use string_comm::{Socket, DEFAULT_PORT};
+use string_comm::{try_continue, Socket, DEFAULT_PORT};
 use string_protocol::ProtocolPacket;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::{
     account::AccountContext,
@@ -117,18 +117,30 @@ impl Context {
 
         // create new socket
         debug!("Creating new socket... binding to 0.0.0.0:{}", DEFAULT_PORT);
-        let (inner, packets) =
+        let (mut inner, packets) =
             Socket::bind(([0, 0, 0, 0], DEFAULT_PORT).into(), secret_key).await?;
-        *socket = StatefulSocket::Active(inner);
-        self.inbound_app_rx.write().await.replace(packets);
+
+        // prepare database
+        self.cache
+            ._db_push()
+            .await
+            .expect("failed to push to database - fuck");
 
         // look for initial peers
         let peers = self.cache.peer().find_many(vec![]).exec().await?;
         info!("Attempting to establish a connection with the following peers:");
         for peer in peers {
-            info!("- Peer: {:?}", peer);
-            self.lighthouse_ctx.get_node_address(peer.id).await?;
+            info!("- {:?}", peer);
+            let addr = try_continue!(
+                self.lighthouse_ctx.get_node_address(&peer.id).await,
+                "could not add peer"
+            );
+            inner.add_peer(addr, peer.id, true).await;
+            info!("-> mapped to: {:?}", addr);
         }
+
+        self.inbound_app_rx.write().await.replace(packets);
+        *socket = StatefulSocket::Active(inner);
 
         Ok(())
     }
