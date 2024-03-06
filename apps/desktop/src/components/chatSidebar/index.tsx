@@ -37,7 +37,8 @@ export default function ChatSidebar({
 
 	// runs only after the first render to set initial selected channel
 	useEffect(() => {
-		if (data && selectedChannel < 0) {
+		console.log("data: ", data);
+		if (data && data.length > 0 && selectedChannel < 0) {
 			setSelectedChannel(data[0]!.id as number);
 		}
 	}, []);
@@ -85,6 +86,7 @@ export default function ChatSidebar({
 			</div>
 			<div className="px-2 py-2 flex flex-col items-center no-scrollbar overflow-auto space-y-1 bg-transparent">
 				{data &&
+					data.length > 0 &&
 					data.map((channel) => (
 						<div
 							key={channel.id}
