@@ -85,7 +85,7 @@ async fn login_account(ctx: Ctx, args: LoginArgs) -> Result<(), rspc::Error> {
         )
     })?;
 
-    ctx.setup_socket(args.username, secret_key)
+    ctx.setup_socket(args.username, String::new(), secret_key)
         .await
         .map_err(|err| {
             rspc::Error::with_cause(
@@ -169,7 +169,7 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
         )
     })?;
 
-    ctx.setup_socket(args.username, secret_key)
+    ctx.setup_socket(args.username, String::new(), secret_key)
         .await
         .map_err(|err| {
             rspc::Error::with_cause(
@@ -194,9 +194,9 @@ async fn get_fingerprint(ctx: Ctx, _: ()) -> Result<String, rspc::Error> {
 }
 
 /// Get the fingerprint of the active user in bytes
-async fn get_fingerprint(ctx: Ctx, _: ()) -> Result<Vec<u8>, rspc::Error> {
+async fn get_fingerprint_in_bytes(ctx: Ctx, _: ()) -> Result<Vec<u8>, rspc::Error> {
     match *ctx.account_ctx.fingerprint.read().await {
-        Some(ref fingerprint) => Ok(fingerprint),
+        Some(ref fingerprint) => Ok(fingerprint.to_owned()),
         None => Err(rspc::Error::new(
             rspc::ErrorCode::NotFound,
             "No active user".to_string(),

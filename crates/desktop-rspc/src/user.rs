@@ -9,7 +9,7 @@ pub fn attach_user_queries<TMeta: Send>(
     builder
         .query("user.list", |t| t(list_users))
         .query("user.user", |t| t(get_user))
-        .mutate("user.update_user_details", |t| t(update_user_details))
+        .mutation("user.update_user_details", |t| t(update_user_details))
 }
 
 /// Fetch a list of users from the cache.
@@ -19,7 +19,7 @@ pub async fn get_user(
 ) -> Result<Option<cache_prisma::user::Data>, rspc::Error> {
     ctx.cache
         .user()
-        .find_unique(vec![cache_prisma::user::id::equals(user_id)])
+        .find_unique(cache_prisma::user::id::equals(user_id))
         .exec()
         .await
         .map_err(|err| {
@@ -55,17 +55,17 @@ pub struct UpdateUserDetails {
 }
 
 /// Update user_detils
-pub async fn list_users(
+pub async fn update_user_details(
     ctx: Ctx,
     args: UpdateUserDetails,
-) -> Result<Vec<cache_prisma::user::Data>, rspc::Error> {
+) -> Result<cache_prisma::user::Data, rspc::Error> {
     ctx.cache
         .user()
         .update(
             cache_prisma::user::id::equals(args.user_id),
             vec![
-                cache_prisma::user::username::equals(args.username),
-                cache_prisma::user::biography::equals(args.biography),
+                cache_prisma::user::username::set(args.username),
+                cache_prisma::user::biography::set(args.biography),
             ],
         )
         .exec()

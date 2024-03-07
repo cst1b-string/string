@@ -235,7 +235,8 @@ async fn main() {
                             hex::decode(fingerprint).expect("bad fingerprint"),
                             false,
                         )
-                        .await;
+                        .await
+						.expect("unable to call Socket::add_peer");
                     {
                         senders_1.write().await.push(app_outbound_tx);
                     }
@@ -332,7 +333,8 @@ async fn main() {
                                 hex::decode(fingerprint).expect("bad fingerprint"),
                                 true,
                             )
-                            .await;
+                            .await
+							.expect("unable to call Socket::add_peer");
                         info!("[+] Sent request to {:?}", target);
                         {
                             senders_2.write().await.push(app_outbound_tx);

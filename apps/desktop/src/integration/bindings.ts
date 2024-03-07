@@ -3,40 +3,45 @@
 export type Procedures = {
     queries: 
         { key: "account.fingerprint", input: never, result: string } | 
+        { key: "account.fingerprint_in_bytes", input: never, result: number[] } | 
         { key: "channel.list", input: never, result: Channel[] } | 
         { key: "channel.messages", input: number, result: Message[] } | 
         { key: "settings.theme", input: never, result: Theme } | 
-        { key: "user.list", input: never, result: User[] },
+        { key: "user.list", input: never, result: User[] } | 
+        { key: "user.user", input: number[], result: User | null },
     mutations: 
         { key: "account.create", input: CreateAccountArgs, result: null } | 
         { key: "account.login", input: LoginArgs, result: null } | 
         { key: "channel.create", input: CreateChannelArgs, result: Channel } | 
         { key: "channel.send", input: SendMessageArgs, result: null } | 
-        { key: "settings.theme", input: Theme, result: null },
+        { key: "settings.theme", input: Theme, result: null } | 
+        { key: "user.update_user_details", input: UpdateUserDetails, result: User },
     subscriptions: 
         { key: "event", input: never, result: Event }
 };
-
-export type LoginArgs = { username: string }
 
 export type Event = "Tick" | "NotConnected" | { MessageReceived: { author: string; channel_id: string; content: string } }
 
 export type CreateChannelArgs = { title: string }
 
-export type User = { id: number[]; username: string }
+export type User = { id: number[]; username: string; biography: string }
+
+export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }
+
+export type CreateAccountArgs = { username: string; passphrase: string }
 
 /**
  * Send a message to the network.
  */
 export type SendMessageArgs = { channel_id: number; content: string }
 
-export type Channel = { id: number; title: string }
+export type LoginArgs = { username: string }
 
 /**
  * The theme of the application.
  */
 export type Theme = "Light" | "Dark"
 
-export type CreateAccountArgs = { username: string; passphrase: string }
+export type Channel = { id: number; title: string }
 
-export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }
+export type UpdateUserDetails = { username: string; biography: string; user_id: number[] }

@@ -104,6 +104,7 @@ impl Context {
     pub async fn setup_socket(
         &self,
         username: String,
+		biography: String,
         secret_key: SignedSecretKey,
     ) -> Result<(), ContextError> {
         // check if socket is active
@@ -130,7 +131,7 @@ impl Context {
             .user()
             .upsert(
                 cache_prisma::user::id::equals(secret_key.public_key().fingerprint()),
-                cache_prisma::user::create(secret_key.public_key().fingerprint(), username, vec![]),
+                cache_prisma::user::create(secret_key.public_key().fingerprint(), username, biography, vec![]),
                 vec![],
             )
             .exec()
@@ -150,7 +151,7 @@ impl Context {
                 self.lighthouse_ctx.get_node_address(&peer.id).await,
                 "could not add peer"
             );
-            inner.add_peer(addr, peer.id, true).await;
+            let _ = inner.add_peer(addr, peer.id, true).await;
             info!("-> mapped to: {:?}", addr);
         }
 

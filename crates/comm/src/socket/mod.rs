@@ -16,7 +16,6 @@ use prost_types::Timestamp;
 use rsntp::AsyncSntpClient;
 
 use pgp::composed::SignedSecretKey;
-use rand::{rngs::OsRng, seq::IteratorRandom};
 use string_protocol::crypto;
 use string_protocol::{MessageType, ProtocolPacket};
 use stunclient::StunClient;
