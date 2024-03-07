@@ -179,19 +179,6 @@ impl Peer {
         Ok(())
     }
 
-    // /// Ask a peer for the peers that they can see are available right now
-    // pub async fn request_available_peers(&mut self) -> Result<(), PeerError> {
-    //     let request_available_peers =
-    //         ProtocolPacketType::PktRequestAvailablePeers(peers::v1::RequestAvailablePeers {});
-
-    //     let packet_tosend = ProtocolPacket {
-    //         packet_type: Some(request_available_peers),
-    //     };
-
-    //     self.send_packet(packet_tosend).await?;
-    //     Ok(())
-    // }
-
     /// Send the peers that we can see available right now
     pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
         let send_available_peers =

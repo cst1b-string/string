@@ -197,18 +197,6 @@ impl Socket {
         Ok(())
     }
 
-    // pub async fn request_available_peers(
-    //     &mut self,
-    //     destination: SocketAddr,
-    // ) -> Result<(), SocketError> {
-    //     // lookup peer
-    //     let mut peers = self.peers.write().await;
-    //     let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
-    //     peer.request_available_peers().await?;
-
-    //     Ok(())
-    // }
-
     pub async fn send_available_peers(
         &mut self,
         destination: SocketAddr,

@@ -94,17 +94,8 @@ pub fn start_peer_sender_worker(
                 trace!("sending packet chunk: {:?}", net_packet);
 
                 match net_outbound_tx.send(net_packet.clone()).await {
-					Ok(_) => {
-						// request doesn't receive an ACK
-						// it receives a RESPONSE
-						// however, if the network surprisingly doesn't go through
-						// then, it'll get resent in the next periodic loop: 
-						// (RequestAvailablePeers is sent in a loop)
-						// if let SocketPacketType::RequestAvailablePeers = net_packet.packet_type {
-						// 	break;
-						// }
-						
-						// add the packet to hashmap of packets that we don't have a ACK to
+                    Ok(_) => {
+                        // add the packet to hashmap of packets that we don't have a ACK to
                         pending_acks_write
                             .insert((net_packet.packet_number, net_packet.chunk_number));
 
