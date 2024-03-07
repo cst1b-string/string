@@ -1,6 +1,7 @@
 //! Defines the UDP socket abstraction and first-layer packet format used for communication between peers.
 
 pub mod error;
+mod gossip;
 mod packet;
 
 use std::{
@@ -14,64 +15,35 @@ use chrono::Datelike;
 use prost_types::Timestamp;
 use rsntp::AsyncSntpClient;
 
+use pgp::composed::SignedSecretKey;
 use rand::{rngs::OsRng, seq::IteratorRandom};
+use string_protocol::crypto;
 use string_protocol::{MessageType, ProtocolPacket};
+use stunclient::StunClient;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
 };
 use tracing::{debug, error, span, trace};
 
+use self::gossip::start_gossip_worker;
 use crate::{
     crypto::{Crypto, DoubleRatchet},
-    maybe_continue,
+    maybe_break, maybe_continue,
     peer::{Peer, PeerState, CHANNEL_SIZE},
     try_break, try_continue,
 };
 
 // re-export types
 pub use self::error::{SocketError, SocketPacketDecodeError};
+pub use self::gossip::{Gossip, GossipAction};
 pub use self::packet::{
     SocketPacket, SocketPacketType, MIN_SOCKET_PACKET_SIZE, UDP_MAX_DATAGRAM_SIZE,
 };
 
-use string_protocol::crypto;
-
-use pgp::composed::SignedSecretKey;
-
-use stunclient::StunClient;
-
-/// Number of peers to send gossip to
-const GOSSIP_COUNT: usize = 3;
-
-pub enum GossipAction {
-    /// Send a normal unencrypted packet to some peers via gossip
-    Send,
-    /// Same as above, but encrypted. This should be the common case
-    SendEncrypted,
-    /// We received a gossip packet, please forward it
-    Forward,
-    /// Actually not a gossip, just send directly
-    SendDirect,
-}
-
-pub struct Gossip {
-    /// What to do with the gossip
-    pub action: GossipAction,
-    /// When this gossip is received from, is None if sending from current node
-    pub addr: Option<SocketAddr>,
-    /// Gossip packet to forward (either this or the one below)
-    pub packet: Option<ProtocolPacket>,
-    /// Gossip message to forward (either this or the one above)
-    pub message: Option<MessageType>,
-    /// Destination to send to; not needed when forwarding
-    pub dest: Option<String>,
-    ///
-    pub dest_sockaddr: Option<SocketAddr>,
-}
-
 /// A wrapper around the [UdpSocket] type that provides a higher-level interface for sending and
 /// receiving packets from multiple peers.
+#[derive(Debug)]
 pub struct Socket {
     /// The inner [UdpSocket] used for sending and receiving packets.
     pub inner: Arc<UdpSocket>,
@@ -87,12 +59,17 @@ pub struct Socket {
     pub curr_time: Arc<RwLock<Timestamp>>,
     /// How our socket is seen externally
     pub external: SocketAddr,
+    /// Channel used to unify inbound packets
+    pub unified_inbound_tx: mpsc::Sender<(Vec<u8>, ProtocolPacket)>,
 }
 
 impl Socket {
     /// Create a new `Socket` that is bound to the given address. This method also
     /// starts the background tasks that handle sending and receiving packets.
-    pub async fn bind(addr: SocketAddr, secret_key: SignedSecretKey) -> Result<Self, SocketError> {
+    pub async fn bind(
+        addr: SocketAddr,
+        secret_key: SignedSecretKey,
+    ) -> Result<(Self, mpsc::Receiver<(Vec<u8>, ProtocolPacket)>), SocketError> {
         // bind socket
 
         let raw_socket = UdpSocket::bind(addr).await.map_err(SocketError::IoError)?;
@@ -122,6 +99,9 @@ impl Socket {
         span!(tracing::Level::INFO, "socket::gossip")
             .in_scope(|| start_gossip_worker(gossip_rx, peers.clone()));
 
+        // create the unified inbound channel
+        let (unified_inbound_tx, unified_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
+
         // start the perodic worker
         span!(tracing::Level::INFO, "socket::periodic")
             .in_scope(|| start_periodic_worker(peers.clone(), curr_time.clone()));
@@ -133,15 +113,19 @@ impl Socket {
 
         let username = Crypto::get_pubkey_username(secret_key.into());
 
-        Ok(Self {
-            inner: socket,
-            peers,
-            crypto,
-            username,
-            gossip_tx,
-            curr_time,
-            external,
-        })
+        Ok((
+            Self {
+                inner: socket,
+                peers,
+                crypto,
+                username,
+                gossip_tx,
+                curr_time,
+                external,
+                unified_inbound_tx,
+            },
+            unified_inbound_rx,
+        ))
     }
 
     /// Add a new peer to the list of connections, returning a channel for receiving
@@ -151,14 +135,14 @@ impl Socket {
         addr: SocketAddr,
         fingerprint: Vec<u8>,
         initiate: bool,
-    ) -> Result<(mpsc::Sender<ProtocolPacket>, mpsc::Receiver<ProtocolPacket>), SocketError> {
+    ) -> Result<mpsc::Sender<ProtocolPacket>, SocketError> {
         let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(
             addr,
             self.crypto.clone(),
             self.peers.clone(),
             self.username.clone(),
             self.gossip_tx.clone(),
-            fingerprint,
+            fingerprint.clone(),
             self.curr_time.clone(),
             initiate,
         )?;
@@ -174,6 +158,17 @@ impl Socket {
         .in_scope(|| {
             spawn_inbound_peer_task(self.inner.clone(), peer.remote_addr, net_outbound_rx)
         });
+
+        // spawn the application worker
+        span!(
+            tracing::Level::INFO,
+            "socket::application",
+            ?peer.remote_addr,
+        )
+        .in_scope(|| {
+            start_application_worker(fingerprint, app_inbound_rx, self.unified_inbound_tx.clone())
+        });
+
         // insert the peer into the connections map - done in a separate block to avoid holding the
         // lock for too long
         {
@@ -181,7 +176,7 @@ impl Socket {
             connections.insert(addr, peer);
         }
 
-        Ok((app_outbound_tx, app_inbound_rx))
+        Ok((app_outbound_tx))
     }
 
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
@@ -367,89 +362,6 @@ fn spawn_inbound_peer_task(
     });
 }
 
-fn start_gossip_worker(
-    mut gossip_rx: mpsc::Receiver<Gossip>,
-    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
-) {
-    tokio::spawn(async move {
-        loop {
-            trace!("start gossip task loop");
-
-            // receive gossip
-            let Gossip {
-                action,
-                addr: skip,
-                packet,
-                message,
-                dest,
-                dest_sockaddr,
-            } = match gossip_rx.recv().await {
-                Some(gossip) => gossip,
-                None => break,
-            };
-
-            if let GossipAction::SendDirect = action {
-                let mut peers_obj = peers.write().await;
-                let peer = peers_obj.get_mut(&dest_sockaddr.unwrap());
-                if peer.is_none() {
-                    continue;
-                }
-                let peer_ = peer.unwrap();
-                let peername = peer_.peername.clone();
-                let _ = peer_
-                    .send_gossip_single(message.unwrap().clone(), peername.unwrap())
-                    .await;
-                continue;
-            }
-
-            // Selects at most 3 peers randomly from list of peers - should
-            // probably employ round robin here.
-            let targets: Vec<_> = peers
-                .read()
-                .await
-                .keys()
-                // skip if included
-                .filter(|addr| skip.map(|skip_addr| skip_addr != **addr).unwrap_or(true))
-                .cloned()
-                .choose_multiple(&mut OsRng, GOSSIP_COUNT);
-
-            // we have no targets!
-            if targets.is_empty() {
-                continue;
-            }
-
-            for target in targets {
-                let mut peers_write = peers.write().await;
-                let target_peer = peers_write.get_mut(&target);
-                let target_peer_ = target_peer.expect("No such peer");
-                let res = match action {
-                    GossipAction::Send => {
-                        trace!("sending gossip {:?}", message);
-                        target_peer_
-                            .send_gossip_single(message.clone().unwrap(), dest.clone().unwrap())
-                            .await
-                    }
-                    GossipAction::SendEncrypted => {
-                        trace!("sending encrypted gossip {:?}", packet);
-                        target_peer_
-                            .send_gossip_single_encrypted(
-                                packet.clone().unwrap(),
-                                dest.clone().unwrap(),
-                            )
-                            .await
-                    }
-                    GossipAction::Forward => {
-                        trace!("forwarding gossip {:?}", packet);
-                        target_peer_.send_packet(packet.clone().unwrap()).await
-                    }
-                    GossipAction::SendDirect => unreachable!(),
-                };
-                if res.is_ok() {}
-            }
-        }
-    });
-}
-
 /// Starts a background worker than can do certain chores at regular intervals
 fn start_periodic_worker(
     peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
@@ -458,7 +370,7 @@ fn start_periodic_worker(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(5000)).await;
-			// periodically send all the peers you can see right now
+            // periodically send all the peers you can see right now
             let mut peers_write = peers.write().await;
             for peer in peers_write.values_mut() {
                 try_continue!(peer.send_available_peers().await);
@@ -468,8 +380,35 @@ fn start_periodic_worker(
             let updated_time = Socket::get_utc_time().await;
             // skip iteration if there's an error
             // otherwise, get the value inside.
-			let updated_time = try_continue!(updated_time);
-			*curr_time.write().await = updated_time;
+            let updated_time = try_continue!(updated_time);
+            *curr_time.write().await = updated_time;
+        }
+    });
+}
+
+/// Starts the background tasks that handle receiving packets from all peers and
+/// forwarding them to the unified inbound channel
+fn start_application_worker(
+    fingerprint: Vec<u8>,
+    mut application_inbound_rx: mpsc::Receiver<ProtocolPacket>,
+    unified_inbound_tx: mpsc::Sender<(Vec<u8>, ProtocolPacket)>,
+) {
+    tokio::spawn(async move {
+        loop {
+            trace!("start application worker loop");
+
+            // receive packet from peer
+            let packet = maybe_break!(
+                application_inbound_rx.recv().await,
+                "Error receiving packet from peer"
+            );
+
+            // send to unified inbound channel
+            debug!(?fingerprint, "forward packet to unified inbound channel");
+            try_break!(
+                unified_inbound_tx.send((fingerprint.clone(), packet)).await,
+                "Error forwarding packet to unified inbound channel"
+            );
         }
     });
 }

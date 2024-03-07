@@ -1,11 +1,11 @@
 use crate::{
-	crypto::{DoubleRatchetError, SigningError},
-	socket::SocketPacket
+    crypto::{DoubleRatchetError, SigningError},
+    socket::SocketPacket,
 };
 
-use tokio::sync::mpsc::error::SendError;
-use string_protocol::{ProtocolPacket, PacketDecodeError, PacketEncodeError};
+use string_protocol::{PacketDecodeError, PacketEncodeError, ProtocolPacket};
 use thiserror::Error;
+use tokio::sync::mpsc::error::SendError;
 
 /// An enumeration of possible errors that can occur when working with peers.
 #[derive(Error, Debug)]

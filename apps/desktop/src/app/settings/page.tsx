@@ -4,10 +4,10 @@ import { useRspc } from "@/integration";
 import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
-	const rspc = useRspc(); 
+	const rspc = useRspc();
 
 	const { data, refetch } = rspc.useQuery(["settings.theme"]); //To load from backend - data is theme "Light" / "Dark"
-	const { mutate: themeMutate, isSuccess:themeIsSuccess } = rspc.useMutation(["settings.theme"]); //To send updated theme to backend
+	const { mutate: themeMutate, isSuccess: themeIsSuccess } = rspc.useMutation(["settings.theme"]); //To send updated theme to backend
 
 	useEffect(() => {
 		refetch();
@@ -21,7 +21,8 @@ export default function Home() {
 	return (
 		<div className="flex flex-row justify-center py-5">
 			<div className="flex flex-col space-y-4 w-[600px]">
-				<div className="flex  justify-center dark:bg-[#335577] bg-[#90E0EF] dark:text-[white] text-[black] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]">
+				<div className="flex  justify-center bg-darkSidebar text-darkText px-4 py-2 rounded-md cursor-pointer hover:bg-darkSidebar">
+
 					<button onClick={() => themeMutate(data === "Dark" ? "Light" : "Dark")}>
 						{lightModeText}
 					</button>
@@ -34,19 +35,19 @@ export default function Home() {
 						console.log("do some calls to the backend here!", username, bio);
 					}}
 				>
-					<div className="flex items-center justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+					<div className="flex items-center justify-center bg-darkSidebar text-darkText px-4 py-2 rounded-md">
 						<label className="mr-4"> Username</label>
 						<input
-							className="flex-grow bg-[#335577] p-4 rounded-md"
+							className="flex-grow bg-darkBackground p-4 rounded-md"
 							value={username}
 							onChange={(e) => setUsername(e.currentTarget.value)}
 						/>
 					</div>
 
-					<div className="flex flex-col justify-center bg-[#113355] text-[white] px-4 py-2 rounded-md">
+					<div className="flex flex-col justify-center bg-darkSidebar text-darkText px-4 py-2 rounded-md">
 						<label className="py-4"> Biography</label>
 						<textarea
-							className="p-4 resize-none w-full rounded-md bg-[#335577]"
+							className="p-4 resize-none w-full rounded-md bg-darkBackground text-darkText"
 							rows={5}
 							value={bio}
 							onChange={(e) => setBio(e.target.value)}
@@ -56,7 +57,7 @@ export default function Home() {
 					<input
 						id="submit"
 						type="submit"
-						className="flex justify-center bg-[#335577] text-[white] px-4 py-2 rounded-md cursor-pointer hover:bg-[#224466]"
+						className="flex justify-center bg-darkSidebar text-darkText px-4 py-2 rounded-md cursor-pointer hover:bg-darkSidebar"
 						value="Submit"
 					/>
 				</form>

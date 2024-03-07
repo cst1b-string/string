@@ -1,10 +1,10 @@
 "use client";
 
 import { IntegrationProvider } from "@/integration";
-import { useRspc } from "@/integration";
 import { Inter } from "next/font/google";
-import React, { createContext, useState } from "react";
+import React, { createContext } from "react";
 
+import { LoginProvider } from "../components/contexts/loginContext";
 import { Navbar } from "../components/navbar";
 import "./globals.css";
 
@@ -42,7 +42,16 @@ export default function RootLayout({
 }>) {
 	return (
 		<IntegrationProvider>
-			<WithTheme>{children}</WithTheme>
+			<LoginProvider>
+				<ThemeContext.Provider value={{ lightMode, setLightMode }}>
+					<html lang="en">
+						<body className={inter.className}>
+							<Navbar />
+							{children}
+						</body>
+					</html>
+				</ThemeContext.Provider>
+			</LoginProvider>
 		</IntegrationProvider>
 	);
 }

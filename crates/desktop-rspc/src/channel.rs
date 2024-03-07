@@ -1,7 +1,7 @@
 use rspc::{ErrorCode, RouterBuilder, Type};
 use serde::Deserialize;
 
-use crate::Ctx;
+use crate::{context::StatefulSocket, Ctx};
 
 /// Attach the channel cache queries to the router.
 pub fn attach_channel_queries<TMeta: Send>(
@@ -11,6 +11,7 @@ pub fn attach_channel_queries<TMeta: Send>(
         .query("channel.list", |t| t(list_channels))
         .query("channel.messages", |t| t(get_channel_messages))
         .mutation("channel.create", |t| t(create_channel))
+        .mutation("channel.send", |t| t(send_message))
 }
 
 /// Fetch a list of channels from the cache.
@@ -57,16 +58,15 @@ pub async fn get_channel_messages(
 #[derive(Debug, Type, Deserialize)]
 pub struct CreateChannelArgs {
     title: String,
-    network_id: i32,
 }
 
 pub async fn create_channel(
     ctx: Ctx,
-    CreateChannelArgs { title, network_id }: CreateChannelArgs,
+    CreateChannelArgs { title }: CreateChannelArgs,
 ) -> Result<cache_prisma::channel::Data, rspc::Error> {
     ctx.cache
         .channel()
-        .create(title, cache_prisma::network::id::equals(network_id), vec![])
+        .create(title, vec![])
         .exec()
         .await
         .map_err(|err| {
@@ -76,4 +76,61 @@ pub async fn create_channel(
                 err,
             )
         })
+}
+
+/// Send a message to the network.
+#[derive(Debug, Type, Deserialize)]
+pub struct SendMessageArgs {
+    channel_id: i32,
+    content: String,
+}
+
+/// Send a message to the network.
+async fn send_message(ctx: Ctx, args: SendMessageArgs) -> Result<(), rspc::Error> {
+    let fingerprint = {
+        let fingerprint = ctx.account_ctx.fingerprint.read().await;
+        match fingerprint.as_ref() {
+            None => {
+                return Err(rspc::Error::new(
+                    ErrorCode::Unauthorized,
+                    "not logged in".to_string(),
+                ));
+            }
+            Some(fingerprint) => fingerprint,
+        }
+        .clone()
+    };
+
+    // TODO: send on socket
+    let socket = ctx.socket.read().await;
+    let socket = match *socket {
+        StatefulSocket::Active(ref socket) => socket,
+        StatefulSocket::Inactive => {
+            return Err(rspc::Error::new(
+                ErrorCode::Unauthorized,
+                "not logged in".to_string(),
+            ));
+        }
+    };
+    // socket.send_gossip_encrypted(ms, destination);
+
+    // push message to cache - maybe wait for response from socket?
+    ctx.cache
+        .message()
+        .create(
+            args.content,
+            cache_prisma::user::id::equals(fingerprint.clone()),
+            cache_prisma::channel::id::equals(args.channel_id),
+            vec![],
+        )
+        .exec()
+        .await
+        .map_err(|err| {
+            rspc::Error::with_cause(
+                ErrorCode::InternalServerError,
+                "failed to send message".into(),
+                err,
+            )
+        })?;
+    Ok(())
 }
