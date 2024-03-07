@@ -3,26 +3,33 @@
 @tailwind utilities;
 
 :root {
-	--background-rgb: 33, 33, 65;
+	--background-hex: #1e306b;
 }
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--background-rgb: 33, 33, 65;
+		--background-hex: #1e306b;
 	}
 }
 
 body {
-	background: rgb(var(--background-rgb));
+	background: var(--background-hex);
+	font-family: "Lucida Grande", Arial, sans-serif !important;
 }
 
 @layer utilities {
 	.text-balance {
 		text-wrap: balance;
 	}
-}
 
-.input {
-	background-color: #3f3f3f;
-	color: #ebe5e5;
+	/* this hides scrollbar for chrome based browsers */
+	.no-scrollbar::-webkit-scrollbar {
+		display: none;
+	}
+
+	/* this hides scrollbar for firefox & microsoft edge */
+	.no-scrollbar {
+		-ms-overflow-style: none;
+		scrollbar-width: none;
+	}
 }

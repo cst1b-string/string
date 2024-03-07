@@ -176,7 +176,7 @@ impl Socket {
             connections.insert(addr, peer);
         }
 
-        Ok((app_outbound_tx))
+        Ok(app_outbound_tx)
     }
 
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
