@@ -3,6 +3,7 @@
 //! and the channels used for passing data between the network tasks.
 
 mod ack;
+pub mod error;
 mod inbound;
 mod outbound;
 
@@ -16,19 +17,21 @@ use std::{
     net::SocketAddr,
     sync::Arc,
 };
+
+use prost_types::Timestamp;
+
 use string_protocol::{
-    crypto, gossip, try_decode_packet, try_encode_internal_packet, try_encode_packet, MessageType,
-    PacketDecodeError, PacketEncodeError, ProtocolPacket, ProtocolPacketType,
-};
-use thiserror::Error;
-use tokio::sync::{
-    mpsc::{self, error::SendError},
-    Mutex, RwLock,
+    crypto, gossip, peers, try_decode_packet, try_encode_internal_packet, try_encode_packet,
+    MessageType, ProtocolPacket, ProtocolPacketType,
 };
 
-use tracing::{debug, error, span, warn, Level};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
-use self::{inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker};
+use tracing::{debug, span, warn, Level};
+
+use self::{
+    error::PeerError, inbound::start_peer_receiver_worker, outbound::start_peer_sender_worker,
+};
 
 /// The buffer size of the various channels used for passing data between the network tasks.
 pub const CHANNEL_SIZE: usize = 32;
@@ -74,38 +77,16 @@ pub struct Peer {
     pub peername: Option<String>,
     ///
     pub fingerprint: Vec<u8>,
+	/// Reference to the current time
+	pub curr_time: Arc<RwLock<Timestamp>>,
+    /// Contains the list of usernames of peers that are available to it
+    pub available_peers: HashSet<String>, 
 }
 
 impl fmt::Debug for Peer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<Peer {0}>", self.remote_addr)
     }
-}
-
-/// An enumeration of possible errors that can occur when working with peers.
-#[derive(Error, Debug)]
-pub enum PeerError {
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to network thread")]
-    NetworkSendFail(#[from] SendError<SocketPacket>),
-    // Failed to send packet between threads.
-    #[error("Failed to send packet to application")]
-    ApplicationSendFail(#[from] SendError<ProtocolPacket>),
-    // Failed to decode decrypted packet
-    #[error("Failed to decode decrypted packet")]
-    DecodeFail(#[from] PacketDecodeError),
-    // Failed to encode packet for encryption
-    #[error("Failed to encode packet for encryption")]
-    EncodeFail(#[from] PacketEncodeError),
-    // Failure in double ratchet
-    #[error("Failure in double ratchet")]
-    DRFail(#[from] DoubleRatchetError),
-    // Generic error with signature
-    #[error("Failure in signature verification")]
-    SigFail(#[from] SigningError),
-    /// The packet we received does not conform to some format
-    #[error("Bad packet")]
-    BadPacket,
 }
 
 impl Peer {
@@ -118,12 +99,16 @@ impl Peer {
         username: String,
         gossip_tx: mpsc::Sender<Gossip>,
         fingerprint: Vec<u8>,
+		curr_time: Arc<RwLock<Timestamp>>, 
         initiate: bool,
-    ) -> (
-        Self,
-        mpsc::Receiver<ProtocolPacket>,
-        mpsc::Receiver<SocketPacket>,
-    ) {
+    ) -> Result<
+        (
+            Self,
+            mpsc::Receiver<ProtocolPacket>,
+            mpsc::Receiver<SocketPacket>,
+        ),
+        PeerError,
+    > {
         // channels for sending and receiving ProtocolPackets to/from the application
         let (app_inbound_tx, app_inbound_rx) = mpsc::channel(CHANNEL_SIZE);
         let (app_outbound_tx, app_outbound_rx) = mpsc::channel(CHANNEL_SIZE);
@@ -165,7 +150,7 @@ impl Peer {
             )
         });
 
-        (
+        Ok((
             Self {
                 remote_addr,
                 app_outbound_tx,
@@ -173,13 +158,16 @@ impl Peer {
                 state,
                 crypto,
                 peers,
-                username,
+                username: username.clone(),
                 peername: None,
                 fingerprint,
+				curr_time,
+				// peers contains itself
+                available_peers: HashSet::from_iter(vec![username]),
             },
             app_inbound_rx,
             net_outbound_rx,
-        )
+        ))
     }
 
     /// Send a packet to the peer.
@@ -191,6 +179,31 @@ impl Peer {
         Ok(())
     }
 
+    /// Send the peers that we can see available right now
+    pub async fn send_available_peers(&mut self) -> Result<(), PeerError> {
+        let send_available_peers =
+            ProtocolPacketType::PktSendAvailablePeers(peers::v1::SendAvailablePeers {
+                peers: self.available_peers.clone().into_iter().collect(),
+                time_sent: Some(self.curr_time.read().await.clone()),
+            });
+
+        let packet_tosend = ProtocolPacket {
+            packet_type: Some(send_available_peers),
+        };
+
+        self.send_packet(packet_tosend).await?;
+        Ok(())
+    }
+
+    /// Now that we've received peers from another person, we check if we can expand our own set of peers
+    pub async fn received_available_peers(&mut self, peers: Vec<String>, time_sent: Option<Timestamp>) {
+		if let Some(time_sent) = time_sent{
+			if compare_timestamps(self.curr_time.read().await.clone(), time_sent){
+				self.available_peers = self.available_peers.union(&HashSet::from_iter(peers)).cloned().collect();
+			}
+        }
+    }
+
     /// Helper function to package and sign a [MessageType] as [Gossip] packet and send to this peer only
     /// For distributing gossip check Socket class instead.
     /// TODO: Sign the gossip packet's contents with our private key
@@ -199,14 +212,18 @@ impl Peer {
         message: crypto::v1::signed_packet_internal::MessageType,
         destination: String,
     ) -> Result<(), PeerError> {
+        let weaken = destination == "*";
         let internal = crypto::v1::SignedPacketInternal {
             destination,
             source: self.username.clone(),
             message_type: Some(message),
         };
         let signature = {
-            let crypto = self.crypto.read().await;
-            crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+            if !weaken {
+                let crypto = self.crypto.read().await;
+                crypto.sign_data(&try_encode_internal_packet(&internal)?)?
+            }
+            else { vec![] }
         };
         let gossip = ProtocolPacketType::PktGossip(gossip::v1::Gossip {
             packet: Some(crypto::v1::SignedPacket {
@@ -217,7 +234,7 @@ impl Peer {
         let tosend = ProtocolPacket {
             packet_type: Some(gossip),
         };
-        self.send_packet(tosend.clone()).await?;
+        self.send_packet(tosend).await?;
         Ok(())
     }
 
@@ -231,12 +248,15 @@ impl Peer {
         let bytes = try_encode_packet(&packet).map_err(PeerError::EncodeFail)?;
         // encrypt message contents
         let content = {
-            let mut crypto = self.crypto.write().await;
-            let ratchet = crypto
-                .ratchets
-                .get_mut(&destination)
-                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-            ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+            if destination == "*" {
+                let mut crypto = self.crypto.write().await;
+                let ratchet = crypto
+                    .ratchets
+                    .get_mut(&destination)
+                    .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                ratchet.encrypt(&bytes).map_err(PeerError::DRFail)?
+            }
+            else { bytes }
         };
         self.send_gossip_single(
             MessageType::EncryptedPacket(crypto::v1::EncryptedPacket { content }),
@@ -269,9 +289,10 @@ impl Peer {
         let source = signed_data.source;
         let mut forward = false;
         let dest = signed_data.destination;
+        let weaken = dest == "*";
 
-        if dest == self.username {
-            {
+        if dest == self.username || dest == "*" {
+            if !weaken {
                 let crypto_obj = self.crypto.read().await;
                 crypto_obj.verify_data(
                     &source,
@@ -311,12 +332,15 @@ impl Peer {
                 }
                 Some(MessageType::EncryptedPacket(enc)) => {
                     let bytes = {
-                        let mut crypto = self.crypto.write().await;
-                        let ratchet = crypto
-                            .ratchets
-                            .get_mut(&source)
-                            .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
-                        ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                        if !weaken {
+                            let mut crypto = self.crypto.write().await;
+                            let ratchet = crypto
+                                .ratchets
+                                .get_mut(&source)
+                                .ok_or(PeerError::DRFail(DoubleRatchetError::MissingRatchet))?;
+                            ratchet.decrypt(&enc.content).map_err(PeerError::DRFail)?
+                        }
+                        else { enc.content }
                     };
                     let packet = try_decode_packet(bytes).map_err(PeerError::DecodeFail)?;
                     app_inbound_tx.send(packet).await?;
@@ -415,4 +439,13 @@ impl Peer {
         self.peername = Some(peername);
         Ok(())
     }
+
+}
+
+/// compares timestamps
+pub fn compare_timestamps(left: Timestamp, right: Timestamp) -> bool {
+    if left.seconds == right.seconds {
+        return left.nanos < right.nanos;
+    } 
+	left.seconds < right.seconds
 }

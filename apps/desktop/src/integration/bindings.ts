@@ -17,26 +17,26 @@ export type Procedures = {
         { key: "event", input: never, result: Event }
 };
 
-export type CreateAccountArgs = { username: string; passphrase: string }
-
 export type LoginArgs = { username: string }
 
 export type Event = "Tick" | "NotConnected" | { MessageReceived: { author: string; channel_id: string; content: string } }
 
 export type CreateChannelArgs = { title: string }
 
-export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }
+export type User = { id: number[]; username: string }
 
 /**
  * Send a message to the network.
  */
 export type SendMessageArgs = { channel_id: number; content: string }
 
+export type Channel = { id: number; title: string }
+
 /**
  * The theme of the application.
  */
 export type Theme = "Light" | "Dark"
 
-export type User = { id: number[]; username: string }
+export type CreateAccountArgs = { username: string; passphrase: string }
 
-export type Channel = { id: number; title: string }
+export type Message = { id: number; content: string; timestamp: string; authorId: number[]; channelId: number }

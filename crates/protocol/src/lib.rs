@@ -54,9 +54,14 @@ pub mod packet {
     include_protocol!("packet", v1);
 }
 
-// Define the types for gossip packets
+/// Defines the types for gossip packets
 pub mod gossip {
     include_protocol!("gossip", v1);
+}
+
+/// Defines the SendAvailablePeers + RequestAvailablePeers
+pub mod peers {
+    include_protocol!("peers", v1);
 }
 
 pub mod prost {

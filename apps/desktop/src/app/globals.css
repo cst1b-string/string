@@ -27,7 +27,7 @@ body {
 		display: none;
 	}
 
-	/* this hides scrollbar for firefox & microsoft edge*/
+	/* this hides scrollbar for firefox & microsoft edge */
 	.no-scrollbar {
 		-ms-overflow-style: none;
 		scrollbar-width: none;

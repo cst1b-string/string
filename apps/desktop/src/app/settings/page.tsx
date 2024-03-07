@@ -13,7 +13,7 @@ export default function Home() {
 		refetch();
 	}, [themeIsSuccess]); //Refetch on successful backend call
 
-	const lightModeText = useMemo(() => (data === "Dark" ? "Dark Mode" : "Light Mode"), [data]); //Text to be displayed on theme button
+	const lightModeText = useMemo(() => (data === "Light" ? "Dark Mode" : "Light Mode"), [data]); //Text to be displayed on theme button
 
 	const [username, setUsername] = useState("<Username from Tauri>");
 	const [bio, setBio] = useState("<Bio from Tauri>");
@@ -22,6 +22,7 @@ export default function Home() {
 		<div className="flex flex-row justify-center py-5">
 			<div className="flex flex-col space-y-4 w-[600px]">
 				<div className="flex  justify-center bg-darkSidebar text-darkText px-4 py-2 rounded-md cursor-pointer hover:bg-darkSidebar">
+
 					<button onClick={() => themeMutate(data === "Dark" ? "Light" : "Dark")}>
 						{lightModeText}
 					</button>

@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use string_protocol::{try_encode_packet, ProtocolPacket};
+use string_protocol::{try_encode_packet, ProtocolPacket, ProtocolPacketType};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, trace, warn};
 
@@ -62,26 +62,33 @@ pub fn start_peer_sender_worker(
             trace!("receive packet from queue");
             let packet: ProtocolPacket = maybe_break!(app_outbound_rx.recv().await);
 
-            // encode packet
-            trace!("encode packet: {:?}", packet);
-            let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
-
             // these locks may cause some contention - investigate
             let mut packet_number = packet_number.lock().await;
             let mut pending_acks_write = pending_acks.write().await;
+
+            // encode packet
+            trace!("encode packet: {:?}", packet);
+            let buf = try_continue!(try_encode_packet(&packet), "Failed to encode packet");
 
             // split packet into network packets and send
             for net_packet in
                 buf.chunks(MAX_PROTOCOL_PACKET_CHUNK_SIZE)
                     .enumerate()
-                    .map(|(chunk_idx, chunk)| {
-                        SocketPacket::new(
+                    .map(|(chunk_idx, chunk)| match packet.packet_type {
+                        Some(ProtocolPacketType::PktRequestAvailablePeers(_)) => {
+                            SocketPacket::empty(
+                                SocketPacketType::Data, //SocketPacketType::RequestAvailablePeers,
+                                *packet_number,
+                                0,
+                            )
+                        }
+                        _ => SocketPacket::new(
                             SocketPacketType::Data,
                             *packet_number,
                             chunk_idx as u32,
                             chunk,
                         )
-                        .expect("failed to create packet")
+                        .expect("failed to create data packet"),
                     })
             {
                 trace!("sending packet chunk: {:?}", net_packet);

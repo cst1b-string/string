@@ -25,7 +25,7 @@ export default function ChatLog({ selectedChannel }: { selectedChannel: number }
 							className={`${index % 2 === 0 ? "bg-darkSelected" : "bg-darkCircularChatButton"}`}
 						>
 							<div className="py-2.5 relative w-11/12 left-2.5 text-white">
-								<div className="font-bold display-inline">User {index % 2 ? "1" : "2"}: </div>
+								<div className="font-bold display-inline">User {index % 2 ? "2" : "1"}: </div>
 								<div className="font-normal">{row.content}</div>
 							</div>
 						</div>
