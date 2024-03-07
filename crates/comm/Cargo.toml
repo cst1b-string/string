@@ -20,5 +20,6 @@ nom = "7.1.3"
 chrono = "0.4.34"
 rsntp = "4.0.0"
 prost-types = "0.12"
+stunclient = "=0.4.0"
 
 string-protocol = { path = "../protocol" }

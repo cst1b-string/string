@@ -52,6 +52,9 @@ pub enum SocketError {
 	// Failure in time synchronisation
 	#[error("Failure in time synchronization")]
 	SynchronizationFail(#[from] SynchronizationError),
+    /// STUN error
+    #[error("STUN error")]
+    StunError,
 }
 
 /// An enumeration of possible errors that can occur when working with [ProtocolPacket]s.

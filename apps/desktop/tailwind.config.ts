@@ -21,6 +21,7 @@ const config: Config = {
 			8: "8px",
 		},
 	},
+	darkMode: 'selector',
 	plugins: [],
 };
 export default config;
