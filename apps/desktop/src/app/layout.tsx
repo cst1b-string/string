@@ -6,6 +6,8 @@ import { createContext, useState } from "react";
 
 import { LoginProvider } from "../components/contexts/loginContext";
 import { Navbar } from "../components/navbar";
+
+import { useRspc } from "@/integration";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -32,14 +34,12 @@ export default function RootLayout({
 	return (
 		<IntegrationProvider>
 			<LoginProvider>
-				<ThemeContext.Provider value={{ lightMode, setLightMode }}>
-					<html lang="en">
-						<body className={inter.className}>
-							<Navbar />
-							{children}
-						</body>
-					</html>
-				</ThemeContext.Provider>
+				<html lang="en">
+					<body className={inter.className}>
+						<Navbar />
+						{children}
+					</body>
+				</html>
 			</LoginProvider>
 		</IntegrationProvider>
 	);

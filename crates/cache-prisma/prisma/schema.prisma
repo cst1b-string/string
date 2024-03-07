@@ -25,10 +25,11 @@ model Channel {
 }
 
 model User {
-    id       Bytes     @id
-    username String
-    messages Message[]
-    peer     Peer?
+    id        Bytes     @id
+    username  String
+    biography String
+    messages  Message[]
+    peer      Peer?
 }
 
 model Peer {

@@ -133,8 +133,9 @@ impl Socket {
             self.username.clone(),
             self.gossip_tx.clone(),
             fingerprint.clone(),
+			self.curr_time.clone(),
             initiate,
-        );
+        )?;
 
         let app_outbound_tx = peer.app_outbound_tx.clone();
 

@@ -42,6 +42,7 @@ pub fn attach_account_queries<TMeta: Send>(
 ) -> RouterBuilder<Ctx, TMeta> {
     builder
         .query("account.fingerprint", |t| t(get_fingerprint))
+        .query("account.fingerprint_in_bytes", |t| t(get_fingerprint_in_bytes))
         .mutation("account.login", |t| t(login_account))
         .mutation("account.create", |t| t(create_account))
 }
@@ -185,6 +186,17 @@ async fn create_account(ctx: Ctx, args: CreateAccountArgs) -> Result<(), rspc::E
 async fn get_fingerprint(ctx: Ctx, _: ()) -> Result<String, rspc::Error> {
     match *ctx.account_ctx.fingerprint.read().await {
         Some(ref fingerprint) => Ok(format!("{:x?}", fingerprint)),
+        None => Err(rspc::Error::new(
+            rspc::ErrorCode::NotFound,
+            "No active user".to_string(),
+        )),
+    }
+}
+
+/// Get the fingerprint of the active user in bytes
+async fn get_fingerprint(ctx: Ctx, _: ()) -> Result<Vec<u8>, rspc::Error> {
+    match *ctx.account_ctx.fingerprint.read().await {
+        Some(ref fingerprint) => Ok(fingerprint),
         None => Err(rspc::Error::new(
             rspc::ErrorCode::NotFound,
             "No active user".to_string(),

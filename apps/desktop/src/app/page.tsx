@@ -8,10 +8,10 @@ import { createContext, useContext, useState } from "react";
 
 import { LoginContext } from "../components/contexts/loginContext";
 
-export const themeContext = createContext({
-	lightMode: false,
-	setLightMode: (value: boolean) => {},
-});
+// export const themeContext = createContext({
+// 	lightMode: false,
+// 	setLightMode: (value: boolean) => {},
+// });
 
 export default function Home() {
 	const [selectedChannel, setSelectedChannel] = useState(-1);
@@ -25,7 +25,6 @@ export default function Home() {
 		router.push("/signIn");
 	}
 
-	const [lightMode, setLightMode] = useState(false);
 	const rspc = useRspc();
 	const sendMsg = rspc.useMutation("channel.send");
 
