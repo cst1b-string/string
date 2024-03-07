@@ -92,7 +92,7 @@ impl fmt::Debug for Peer {
 impl Peer {
     /// Create a new connection to the given destination.
     #[tracing::instrument(name = "peer", skip(initiate))]
-    pub async fn new(
+    pub fn new(
         remote_addr: SocketAddr,
         crypto: Arc<RwLock<Crypto>>,
         peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
@@ -212,7 +212,7 @@ impl Peer {
     pub async fn received_available_peers(&mut self, peers: Vec<String>, time_sent: Option<Timestamp>) {
 		if let Some(time_sent) = time_sent{
 			if compare_timestamps(self.curr_time.read().await.clone(), time_sent){
-				let _ = self.available_peers.union(&HashSet::from_iter(peers));
+				self.available_peers = self.available_peers.union(&HashSet::from_iter(peers)).cloned().collect();
 			}
         }
     }
@@ -243,8 +243,7 @@ impl Peer {
         let tosend = ProtocolPacket {
             packet_type: Some(gossip),
         };
-        // TODO: why is there a clone here? does the function above need one too?
-        self.send_packet(tosend.clone()).await?;
+        self.send_packet(tosend).await?;
         Ok(())
     }
 

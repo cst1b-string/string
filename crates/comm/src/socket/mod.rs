@@ -10,9 +10,9 @@ use std::{
     time::Duration,
 };
 
+use chrono::Datelike;
 use prost_types::Timestamp;
 use rsntp::AsyncSntpClient;
-use chrono::Datelike;
 
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use string_protocol::{MessageType, ProtocolPacket};
@@ -81,8 +81,8 @@ pub struct Socket {
     pub username: String,
     /// Channel used to send gossip
     pub gossip_tx: mpsc::Sender<Gossip>,
-	/// current timestamp used by [Peer] to get available peers
-	pub curr_time: Arc<RwLock<Timestamp>>,
+    /// current timestamp used by [Peer] to get available peers
+    pub curr_time: Arc<RwLock<Timestamp>>,
 }
 
 impl Socket {
@@ -101,8 +101,8 @@ impl Socket {
         let crypto = Arc::new(RwLock::new(Crypto::new(secret_key.clone())));
 
         let (gossip_tx, gossip_rx) = mpsc::channel(CHANNEL_SIZE);
-		
-		let curr_time = Arc::new(RwLock::new(Self::get_utc_time().await?));
+
+        let curr_time = Arc::new(RwLock::new(Self::get_utc_time().await?));
 
         // start the outbound worker
         span!(tracing::Level::INFO, "socket::outbound")
@@ -129,7 +129,7 @@ impl Socket {
             crypto,
             username,
             gossip_tx,
-			curr_time,
+            curr_time,
         })
     }
 
@@ -148,9 +148,9 @@ impl Socket {
             self.username.clone(),
             self.gossip_tx.clone(),
             fingerprint,
-			self.curr_time.clone(),
+            self.curr_time.clone(),
             initiate,
-        ).await?;
+        )?;
 
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
@@ -452,23 +452,24 @@ fn start_gossip_worker(
 }
 
 /// Starts a background worker than can do certain chores at regular intervals
-fn start_periodic_worker(peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>, curr_time: Arc<RwLock<Timestamp>>) {
+fn start_periodic_worker(
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    curr_time: Arc<RwLock<Timestamp>>,
+) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(5000)).await;
-			let mut peers_write = peers.write().await;
-			for peer in peers_write.values_mut(){
-				try_continue!(peer.request_available_peers().await);
-			}
+            let mut peers_write = peers.write().await;
+            for peer in peers_write.values_mut() {
+                try_continue!(peer.request_available_peers().await);
+            }
 
-			// periodically, update time
-			let updated_time = Socket::get_utc_time().await;
-			// skip iteration if there's an error
-			// otherwise, get the value inside. 
-			match updated_time{
-				Ok(updated_time) => *curr_time.write().await = updated_time,
-				_ => continue
-			};
+            // periodically, update time
+            let updated_time = Socket::get_utc_time().await;
+            // skip iteration if there's an error
+            // otherwise, get the value inside.
+			let updated_time = try_continue!(updated_time);
+			*curr_time.write().await = updated_time;
         }
     });
 }

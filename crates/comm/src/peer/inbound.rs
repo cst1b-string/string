@@ -15,7 +15,7 @@ use tracing::{debug, error, trace};
 use crate::{
     maybe_break,
     socket::{Gossip, GossipAction, SocketPacket, SocketPacketType},
-    try_break, try_continue, Peer,
+    try_break, try_continue, Peer, maybe_continue
 };
 
 use super::PeerState;
@@ -258,13 +258,8 @@ pub fn start_peer_receiver_worker(
                             }
 							Some(ProtocolPacketType::PktSendAvailablePeers(send_available_peers)) => {
 								let mut peers_write = peers.write().await;
-								let peer = match peers_write.get_mut(&remote_addr){
-									Some(p) => p,
-									None => {
-										continue;
-									}
-								};
-								peer.received_available_peers(send_available_peers.peers, send_available_peers.time_sent);
+								let peer = maybe_continue!(peers_write.get_mut(&remote_addr));
+								peer.received_available_peers(send_available_peers.peers, send_available_peers.time_sent).await;
 							}
                             _ => {}
                         }
