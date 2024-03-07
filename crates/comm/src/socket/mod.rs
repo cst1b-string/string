@@ -197,17 +197,17 @@ impl Socket {
         Ok(())
     }
 
-    pub async fn request_available_peers(
-        &mut self,
-        destination: SocketAddr,
-    ) -> Result<(), SocketError> {
-        // lookup peer
-        let mut peers = self.peers.write().await;
-        let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
-        peer.request_available_peers().await?;
+    // pub async fn request_available_peers(
+    //     &mut self,
+    //     destination: SocketAddr,
+    // ) -> Result<(), SocketError> {
+    //     // lookup peer
+    //     let mut peers = self.peers.write().await;
+    //     let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
+    //     peer.request_available_peers().await?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     pub async fn send_available_peers(
         &mut self,
@@ -459,9 +459,10 @@ fn start_periodic_worker(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(5000)).await;
+			// periodically send all the peers you can see right now
             let mut peers_write = peers.write().await;
             for peer in peers_write.values_mut() {
-                try_continue!(peer.request_available_peers().await);
+                try_continue!(peer.send_available_peers().await);
             }
 
             // periodically, update time

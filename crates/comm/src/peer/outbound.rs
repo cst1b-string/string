@@ -77,7 +77,7 @@ pub fn start_peer_sender_worker(
                     .map(|(chunk_idx, chunk)| match packet.packet_type {
                         Some(ProtocolPacketType::PktRequestAvailablePeers(_)) => {
                             SocketPacket::empty(
-                                SocketPacketType::RequestAvailablePeers,
+                                SocketPacketType::Data, //SocketPacketType::RequestAvailablePeers,
                                 *packet_number,
                                 0,
                             )
@@ -100,9 +100,9 @@ pub fn start_peer_sender_worker(
 						// however, if the network surprisingly doesn't go through
 						// then, it'll get resent in the next periodic loop: 
 						// (RequestAvailablePeers is sent in a loop)
-						if let SocketPacketType::RequestAvailablePeers = net_packet.packet_type {
-							break;
-						}
+						// if let SocketPacketType::RequestAvailablePeers = net_packet.packet_type {
+						// 	break;
+						// }
 						
 						// add the packet to hashmap of packets that we don't have a ACK to
                         pending_acks_write

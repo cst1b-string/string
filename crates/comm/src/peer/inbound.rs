@@ -92,8 +92,6 @@ pub fn start_peer_receiver_worker(
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
-                        | SocketPacketType::RequestAvailablePeers
-                        | SocketPacketType::SendAvailablePeers
                         | SocketPacketType::Invalid => {}
                     }
                 }
@@ -131,8 +129,6 @@ pub fn start_peer_receiver_worker(
                         }
                         SocketPacketType::Heartbeat
                         | SocketPacketType::Data
-                        | SocketPacketType::RequestAvailablePeers
-                        | SocketPacketType::SendAvailablePeers
                         | SocketPacketType::Invalid => {}
                     }
                 }
@@ -145,21 +141,6 @@ pub fn start_peer_receiver_worker(
                         let mut packets = packet_acks.write().await;
                         packets.remove(&(packet.packet_number, packet.chunk_number));
                     }
-                    SocketPacketType::RequestAvailablePeers => {
-						let mut peers_read = peers.write().await;
-						let peer = match peers_read.get_mut(&remote_addr) {
-							Some(p) => p,
-							None => {
-								continue;
-							}
-						};
-						try_continue!(
-							peer.send_available_peers().await
-						)
-					}
-                    SocketPacketType::SendAvailablePeers => {
-
-					}
                     SocketPacketType::Data => {
                         // send ack
                         try_break!(
