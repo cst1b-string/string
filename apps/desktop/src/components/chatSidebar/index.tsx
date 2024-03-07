@@ -89,7 +89,7 @@ export default function ChatSidebar({
 					data.map((channel) => (
 						<div
 							key={channel.id}
-							className={` text-white w-full py-1 px-1 rounded ${
+							className={` text-white w-full py-1 px-1 rounded-xl ${
 								filteredChannels.has(channel.id) ? "hidden" : ""
 							} ${selectedChannel == channel.id ? "bg-darkSelected" : " hover:bg-darkHover"}`}
 							onClick={() => handleChannelClick(channel)}

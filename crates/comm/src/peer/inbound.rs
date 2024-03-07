@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, trace};
 
 use crate::{
-    maybe_break,
+    maybe_break, maybe_continue,
     socket::{Gossip, GossipAction, SocketPacket, SocketPacketType},
     try_break, try_continue, Peer,
 };
@@ -237,8 +237,18 @@ pub fn start_peer_receiver_worker(
                                     peer.add_peer_pubkey(&peerpubexchange.pubkey).await.unwrap()
                                 };
                             }
-                            Some(_) => {}
-                            None => {}
+                            Some(ProtocolPacketType::PktSendAvailablePeers(
+                                send_available_peers,
+                            )) => {
+                                let mut peers_write = peers.write().await;
+                                let peer = maybe_continue!(peers_write.get_mut(&remote_addr));
+                                peer.received_available_peers(
+                                    send_available_peers.peers,
+                                    send_available_peers.time_sent,
+                                )
+                                .await;
+                            }
+                            _ => {}
                         }
 
                         // clear queue

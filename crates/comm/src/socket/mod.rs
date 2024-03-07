@@ -11,7 +11,12 @@ use std::{
     time::Duration,
 };
 
+use chrono::Datelike;
+use prost_types::Timestamp;
+use rsntp::AsyncSntpClient;
+
 use pgp::composed::SignedSecretKey;
+use rand::{rngs::OsRng, seq::IteratorRandom};
 use string_protocol::crypto;
 use string_protocol::{MessageType, ProtocolPacket};
 use stunclient::StunClient;
@@ -50,6 +55,8 @@ pub struct Socket {
     pub username: String,
     /// Channel used to send gossip
     pub gossip_tx: mpsc::Sender<Gossip>,
+    /// current timestamp used by [Peer] to get available peers
+    pub curr_time: Arc<RwLock<Timestamp>>,
     /// How our socket is seen externally
     pub external: SocketAddr,
     /// Channel used to unify inbound packets
@@ -82,6 +89,8 @@ impl Socket {
 
         let (gossip_tx, gossip_rx) = mpsc::channel(CHANNEL_SIZE);
 
+        let curr_time = Arc::new(RwLock::new(Self::get_utc_time().await?));
+
         // start the outbound worker
         span!(tracing::Level::INFO, "socket::outbound")
             .in_scope(|| start_outbound_worker(socket.clone(), peers.clone()));
@@ -95,7 +104,7 @@ impl Socket {
 
         // start the perodic worker
         span!(tracing::Level::INFO, "socket::periodic")
-            .in_scope(|| start_periodic_worker(peers.clone()));
+            .in_scope(|| start_periodic_worker(peers.clone(), curr_time.clone()));
 
         if secret_key.details.users.len() != 1 {
             // Why do we have a weird number of users
@@ -111,6 +120,7 @@ impl Socket {
                 crypto,
                 username,
                 gossip_tx,
+                curr_time,
                 external,
                 unified_inbound_tx,
             },
@@ -125,7 +135,7 @@ impl Socket {
         addr: SocketAddr,
         fingerprint: Vec<u8>,
         initiate: bool,
-    ) -> mpsc::Sender<ProtocolPacket> {
+    ) -> Result<mpsc::Sender<ProtocolPacket>, SocketError> {
         let (peer, app_inbound_rx, net_outbound_rx) = Peer::new(
             addr,
             self.crypto.clone(),
@@ -133,8 +143,9 @@ impl Socket {
             self.username.clone(),
             self.gossip_tx.clone(),
             fingerprint.clone(),
+            self.curr_time.clone(),
             initiate,
-        );
+        )?;
 
         let app_outbound_tx = peer.app_outbound_tx.clone();
 
@@ -165,7 +176,7 @@ impl Socket {
             connections.insert(addr, peer);
         }
 
-        app_outbound_tx
+        Ok(app_outbound_tx)
     }
 
     pub async fn get_peer_state(&mut self, addr: SocketAddr) -> Option<PeerState> {
@@ -188,6 +199,18 @@ impl Socket {
         let mut peers = self.peers.write().await;
         let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
         peer.send_packet(packet).await?;
+
+        Ok(())
+    }
+
+    pub async fn send_available_peers(
+        &mut self,
+        destination: SocketAddr,
+    ) -> Result<(), SocketError> {
+        // lookup peer
+        let mut peers = self.peers.write().await;
+        let peer = peers.get_mut(&destination).ok_or(SocketError::Unknown)?;
+        peer.send_available_peers().await?;
 
         Ok(())
     }
@@ -264,6 +287,19 @@ impl Socket {
             }
         }
     }
+
+    async fn get_utc_time() -> Result<Timestamp, SocketError> {
+        let client = AsyncSntpClient::new();
+        let result = client.synchronize("pool.ntp.org").await?;
+
+        let curr_time = result.datetime().into_chrono_datetime()?;
+        // unwrap here is safe (month is <= 12 and day is <= 31)
+        Ok(Timestamp::date(
+            curr_time.year().into(),
+            curr_time.month().try_into().unwrap(),
+            curr_time.day().try_into().unwrap(),
+        )?)
+    }
 }
 
 /// Start the outbound network worker.
@@ -327,10 +363,25 @@ fn spawn_inbound_peer_task(
 }
 
 /// Starts a background worker than can do certain chores at regular intervals
-fn start_periodic_worker(_peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>) {
+fn start_periodic_worker(
+    peers: Arc<RwLock<HashMap<SocketAddr, Peer>>>,
+    curr_time: Arc<RwLock<Timestamp>>,
+) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(5000)).await;
+            // periodically send all the peers you can see right now
+            let mut peers_write = peers.write().await;
+            for peer in peers_write.values_mut() {
+                try_continue!(peer.send_available_peers().await);
+            }
+
+            // periodically, update time
+            let updated_time = Socket::get_utc_time().await;
+            // skip iteration if there's an error
+            // otherwise, get the value inside.
+            let updated_time = try_continue!(updated_time);
+            *curr_time.write().await = updated_time;
         }
     });
 }
